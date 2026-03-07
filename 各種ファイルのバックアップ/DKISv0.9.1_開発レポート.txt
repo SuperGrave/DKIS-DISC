@@ -1,0 +1,366 @@
+# DKISv0.9.1 開発レポート
+
+## 📋 プロジェクト概要
+
+**DKIS（Drive Kiritan to Issho System）v0.9.1** は、v0.8.3のマルチデバイス対応・統計情報・UI/UXの基盤を継承しつつ、**天気予報機能の全面改修**と**プロンプト管理の強化**、**依存関係管理のモダン化**を実現したバージョンです。
+
+### v0.9.1のテーマ
+- **天気予報の緯度経度対応**: 気象庁APIに加え Open-Meteo API を統合し、地名→緯度経度で取得可能に
+- **「両方」モード**: 気象庁API と Open-Meteo API の両方から天気を取得して合成表示
+- **天気地名解決AIのプロンプト分離**: 気象庁用（地名→ID）と Open-Meteo用（地名→緯度経度）を設定可能に
+- **プロンプトごとの個別リセット**: 全設定を初期化せず、指定プロンプトだけをデフォルトに戻す機能
+- **依存関係管理の uv 移行**: pyproject.toml + uv.lock による再現可能なビルド
+
+### v0.8.3から継承した基盤（変更なし）
+- 音声設定の2層分離（サーバー側TTS合成 / クライアント側再生）
+- 統計情報システム（ユーザー入力・RETRY・きりたん返答・AI処理要求・コマンド実行回数）
+- 音量のクライアント側リアルタイム調整
+- 吹き出しの二分探索リサイズ・シンプルデザイン
+- Spotify KeepAlive 条件改善
+- AI動作の最適化（自動選択・即時実行プロンプト）
+
+---
+
+## 🆕 v0.8.3 → v0.9.1 の主要変更点
+
+### 🌤️ 天気予報機能の全面改修（最重要）
+
+#### **背景（v0.8.3まで）**
+- 天気予報は気象庁APIのみ利用
+- 地名は「気象庁予報地点ID」（6桁数字）に解決する必要がある
+- 緯度経度ベースのAPI（Open-Meteo 等）を利用する仕組みがなかった
+
+#### **解決策（v0.9.1）**
+1. **緯度経度テーブル（locations.csv）の導入**  
+   地名IDに依存せず、緯度経度で天気を取得できるようにする。
+2. **Open-Meteo API の統合**  
+   緯度・経度を指定して天気を取得するAPIを追加。
+3. **天気API選択機能**  
+   `weather.service` で `jma` / `open-meteo` / `both` を選択可能に。
+4. **「両方」モード**  
+   気象庁API と Open-Meteo API の両方から取得し、結果を合成して表示。
+5. **「現在地」の明示的サポート**  
+   「現在地」「ここ」「current」等を `w_location: "現在地"` として扱い、現在地の緯度経度で取得。
+
+#### **実装概要**
+
+**1. 緯度経度テーブル（core/locations.csv）**
+- 形式: `pref,title,lat,lon` のCSV
+- 初期データ: primary_area.xml の全142地点を抽出して登録（既存緯度経度は再利用、新規は 0.0, 0.0）
+- 読み込み: `weather.py` の `load_location_rows()`、メモリキャッシュ `_LOCATION_CACHE`（TTL: 86400秒）
+- 起動時: `main.py` で `warm_location_table()` を呼び出しプリロード
+
+**2. 地名解決AIの2系統**
+- **気象庁API用（地名→地点ID）**
+  - 関数: `ai_resolve_city_id_simple()`
+  - プロンプト: `system_prompts.weather_jma_id`（設定可能）
+  - 参照: primary_area.xml / primary_area.csv
+- **Open-Meteo用（地名→緯度経度）**
+  - 関数: `ai_resolve_location_coordinates()`
+  - プロンプト: `system_prompts.weather_coordinates`（設定可能）
+  - 参照: locations.csv
+- 共通: AI解決 → 完全一致検索 → 都道府県寄せのフォールバック
+
+**3. 天気API選択（settings.json）**
+```json
+"weather": {
+  "service": "jma" | "open-meteo" | "both"
+}
+```
+- **jma**: 従来通り気象庁APIのみ
+- **open-meteo**: Open-Meteo API のみ（地名→緯度経度解決）
+- **both**: 両方から取得し、【気象庁API】と【Open-Meteo API】のセクションに分けて表示
+
+**4. 「両方」モードの処理フロー**
+- 現在地: 気象庁は現在地の地名→ID、Open-Meteoは現在地の緯度経度で取得
+- 場所指定: 気象庁は指定地名→ID、Open-Meteoは指定地名→緯度経度で取得
+- どちらかが失敗しても、成功した方の結果を返す。DMISログに両方の解決結果を記録
+
+**効果**
+- 気象庁以外のデータソースを利用可能
+- 緯度経度が分かれば任意地点の天気取得が可能（locations.csv 拡張で対応）
+- 両方モードで比較・冗長性を確保
+
+**影響ファイル**
+- `core/locations.csv`: 新規（緯度経度テーブル）
+- `core/weather.py`: 緯度経度読み込み、`ai_resolve_location_coordinates()`、設定からプロンプト読み込み
+- `core/functions.py`: `get_weather()` 改修、`_get_weather_jma()` / `_get_weather_open_meteo_from_place()`、「両方」モード
+- `config.py`: 天気用プロンプトデフォルト（weather_jma_id, weather_coordinates）、WEATHER_SERVICE コメント
+- `main.py`: `warm_location_table()` 呼び出し
+- `templates/index.html`: 天気API選択UIに「両方」オプション追加
+
+---
+
+### 📝 プロンプト管理機能の改善
+
+#### **1. プロンプトごとの個別リセット**
+
+**問題点（v0.8.3）**
+- 「デフォルトに戻す」で全設定がリセットされる
+- 1つのプロンプトだけを元に戻したい場合に不便
+
+**解決策（v0.9.1）**
+- プロンプトごとに🔄リセットボタンを配置
+- 新規API: `POST /api/settings/prompts/reset`
+- パラメータ: `{"prompt_type": "main" | "chat_only" | "search" | "text" | "weather_jma_id" | "weather_coordinates"}`
+- 指定したプロンプトのみ config のデフォルト値に戻し、保存後に `settings_updated` を全クライアントに配信
+- 設定画面の「初期化」ボタンは従来通り全設定リセット（変更なし）
+
+**実装（main.py）**
+```python
+@app.route("/api/settings/prompts/reset", methods=["POST"])
+@role_required("operator")
+def api_settings_prompts_reset():
+    data = request.get_json() or {}
+    prompt_type = data.get("prompt_type")
+    # デフォルト取得 → 現在設定読み込み → 指定プロンプトのみ上書き → 保存 → イベント配信
+```
+
+**影響ファイル**
+- `main.py`: `/api/settings/prompts/reset` エンドポイント、prompt_type → settings キー対応
+- `static/js/settings.js`: `resetPrompt()` のAPI呼び出し先を当該エンドポイントに変更
+
+---
+
+#### **2. 天気地名解決AIプロンプトの設定可能化**
+
+**背景**
+- 気象庁API用（地名→ID）と Open-Meteo用（地名→緯度経度）で別々の地名解決AIが必要になった
+- プロンプトを設定画面から編集・保存できるようにする
+
+**実装**
+- `config.py`: `SYSTEM_PROMPT_FILES` に `weather_jma_id`, `weather_coordinates` を追加。`_get_default_prompt()` に両タイプを追加。`SYSTEM_PROMPT_WEATHER_JMA_ID`, `SYSTEM_PROMPT_WEATHER_COORDINATES` を定義
+- `core/settings_manager.py`: `get_default_settings()` の `system_prompts` に上記2つを追加。`_apply_prompt_defaults()` / `ensure_prompt()` で初回補完
+- `core/weather.py`: `ai_resolve_city_id_simple()`, `ai_resolve_location_coordinates()` 内で `get_setting("system_prompts.weather_jma_id", ...)` / `get_setting("system_prompts.weather_coordinates", ...)` を参照
+- `templates/index.html`: ≪気象庁API用地名→ID解決≫ と ≪Open-Meteo用地名→緯度経度解決≫ の編集・リセットUIを追加
+- `static/js/settings.js`: 上記2プロンプトの読み込み・保存・文字数表示を追加
+
+**効果**
+- 天気用地名解決の挙動をプロンプトでカスタマイズ可能
+- 他プロンプトと同様に編集・個別リセットが可能
+
+**影響ファイル**
+- `config.py`, `core/settings_manager.py`, `core/weather.py`, `templates/index.html`, `static/js/settings.js`
+
+---
+
+### 📦 依存関係管理の uv 移行
+
+#### **目的**
+- 依存関係の標準化と再現可能なビルド
+- 高速なパッケージ管理（uv は Rust 製）
+
+#### **構成**
+- **pyproject.toml**
+  - `[project]`: プロジェクト情報と依存関係（flask>=3.0.0, openai>=1.0.0, requests>=2.31.0, spotipy>=2.23.0, chardet>=5.0.0 等）
+  - `[dependency-groups]`: 開発用（dev）
+  - `[tool.uv]`: package = false 等
+- **uv.lock**
+  - uv が生成するロックファイル。同じ環境を再現可能に
+
+**影響ファイル**
+- `pyproject.toml`: 新規
+- `uv.lock`: 新規（uv が生成）
+
+---
+
+## 🏗️ システムアーキテクチャ（v0.9.1）
+
+### 技術スタック（v0.8.3継承 + v0.9.1追加）
+- バックエンド: Flask、SSE、統計情報、TTS設定同期（v0.8.3）
+- 天気: 気象庁API + Open-Meteo API、locations.csv、2系統の地名解決AI（v0.9.1）
+- 設定: settings.json、プロンプト個別リセットAPI、天気用プロンプト2種（v0.9.1）
+- 依存関係: uv + pyproject.toml + uv.lock（v0.9.1）
+
+### 天気予報まわりの構成（v0.9.1）
+
+```
+ユーザー「東京の天気」
+       │
+       ▼
+┌──────────────────────────────────────────────────────────┐
+│ get_weather() (core/functions.py)                         │
+│   weather.service = jma | open-meteo | both              │
+└──────────────────────────────────────────────────────────┘
+       │
+       ├─ jma ────────► ai_resolve_city_id_simple()
+       │                  (primary_area.xml, weather_jma_id プロンプト)
+       │                  → 気象庁API
+       │
+       ├─ open-meteo ─► ai_resolve_location_coordinates()
+       │                  (locations.csv, weather_coordinates プロンプト)
+       │                  → Open-Meteo API
+       │
+       └─ both ───────► 上記2つを並列実行 → 結果を合成表示
+```
+
+---
+
+## 📁 ファイル構成マップ（v0.9.1）
+
+### ディレクトリ構造（v0.9.1で追加・変更した部分）
+
+```
+DKISv0.9.1/
+│
+├── main.py                    # warm_location_table(), /api/settings/prompts/reset
+├── config.py                  # 天気用プロンプト定義、SYSTEM_PROMPT_FILES 拡張
+├── pyproject.toml             # 🆕 依存関係（uv）
+├── uv.lock                    # 🆕 ロックファイル
+│
+├── core/
+│   ├── locations.csv          # 🆕 緯度経度テーブル（142地点）
+│   ├── weather.py             # 🆕 緯度経度読み込み、ai_resolve_location_coordinates、設定からプロンプト取得
+│   ├── functions.py           # 🆕 get_weather() 改修、両方モード、_get_weather_jma / _get_weather_open_meteo_from_place
+│   ├── settings_manager.py   # 🆕 天気用プロンプト default / ensure_prompt
+│   ├── gpt_handler.py         # （v0.8.3継承）
+│   ├── voicevox_handler.py    # （v0.8.3継承）
+│   ├── spotify_handler.py     # （v0.8.3継承）
+│   ├── primary_area.xml       # 気象庁予報地点
+│   └── ...
+│
+├── templates/
+│   └── index.html             # 🆕 天気API選択「両方」、天気用地名解決プロンプト2項目
+│
+├── static/js/
+│   ├── settings.js            # 🆕 プロンプトリセットAPI、weather_jma_id/weather_coordinates 扱い
+│   ├── main.js                # （v0.8.3継承）
+│   ├── ui.js                  # （v0.8.3継承）
+│   └── ...
+│
+└── 各種ファイルのバックアップ/
+    ├── DKISv0.8.3_開発レポート.txt   # v0.8.3 履歴
+    └── DKISv0.9.1_開発レポート.txt   # 🆕 本レポート
+```
+
+---
+
+## 📄 主要ファイルの詳細（v0.9.1での変更点）
+
+### バックエンド
+
+#### **main.py**
+- `warm_location_table()` の起動時呼び出し（locations.csv プリロード）
+- `POST /api/settings/prompts/reset`: プロンプト種別を受け取り、該当プロンプトのみデフォルトに戻して保存し、`settings_updated` を配信
+- prompt_type → settings キー対応（main, chat_only, search_summary, text_summary, weather_jma_id, weather_coordinates）
+
+#### **core/weather.py**
+- `_LOCATIONS_CSV`: 環境変数 `LOCATIONS_CSV` または `core/locations.csv`
+- `load_location_rows()`, `_LOCATION_CACHE`: CSV 読み込みとメモリキャッシュ
+- `ai_resolve_location_coordinates()`: 地名→緯度経度（設定の `system_prompts.weather_coordinates` を使用）
+- `ai_resolve_city_id_simple()`: 設定の `system_prompts.weather_jma_id` を使用するよう変更
+
+#### **core/functions.py**
+- `get_weather()`: `weather.service` に応じて `jma` / `open-meteo` / `both` を分岐
+- `_get_weather_jma()`, `_get_weather_open_meteo_from_place()`: 各API専用の内部関数
+- 「両方」モード: 両結果を【気象庁API】【Open-Meteo API】に分けて合成。現在地の場合は「現在地」を明示的に扱う
+
+#### **core/settings_manager.py**
+- `get_default_settings()` の `system_prompts` に `weather_jma_id`, `weather_coordinates` を追加
+- `_apply_prompt_defaults()` / `ensure_prompt()` で上記2つを補完
+
+#### **config.py**
+- `SYSTEM_PROMPT_FILES` に `weather_jma_id`, `weather_coordinates` を追加
+- `_get_default_prompt()` に両タイプを追加
+- `SYSTEM_PROMPT_WEATHER_JMA_ID`, `SYSTEM_PROMPT_WEATHER_COORDINATES` を定義
+
+### フロントエンド
+
+#### **static/js/settings.js**
+- プロンプトリセット: `resetPrompt()` が `POST /api/settings/prompts/reset` を呼び出し
+- 天気用プロンプト: `promptWeatherJmaId`, `promptWeatherCoordinates` の読み込み・保存・文字数表示
+- `weather.service` の選択値の読み込み・保存
+
+#### **templates/index.html**
+- 天気API選択: ラジオまたはセレクトで `jma` / `open-meteo` / `both` を選択可能
+- プロンプト編集: ≪気象庁API用地名→ID解決≫ と ≪Open-Meteo用地名→緯度経度解決≫ のテキストエリア・編集・リセットボタン
+
+---
+
+## 📊 設定・API 一覧（v0.9.1追加分）
+
+### 新規設定項目（settings.json）
+- `weather.service`: `"jma"` | `"open-meteo"` | `"both"`
+- `system_prompts.weather_jma_id`: 気象庁API用地名→ID解決用プロンプト
+- `system_prompts.weather_coordinates`: Open-Meteo用地名→緯度経度解決用プロンプト
+
+### 新規API
+- `POST /api/settings/prompts/reset`  
+  Body: `{"prompt_type": "main"|"chat_only"|"search"|"text"|"weather_jma_id"|"weather_coordinates"}`  
+  指定プロンプトのみデフォルトに戻す。operator 権限必要。
+
+### 互換性
+- v0.9.1 以前の settings.json には `weather_jma_id` / `weather_coordinates` が無いため、初回ロード時に `_apply_prompt_defaults()` で自動補完される。
+
+---
+
+## 🌟 v0.9.1の主な成果
+
+### 🆕 新機能
+- **天気予報の緯度経度対応**: locations.csv と Open-Meteo API により、地名→緯度経度で天気取得が可能に
+- **「両方」モード**: 気象庁と Open-Meteo の両方の結果を合成表示
+- **現在地の明示的サポート**: 「現在地」「ここ」等で現在地の緯度経度を使用
+- **プロンプトごとの個別リセット**: 全設定を触らずに、指定プロンプトだけデフォルトに戻せる
+- **天気地名解決プロンプトの設定可能化**: 気象庁用・Open-Meteo用をそれぞれ編集・保存可能
+- **uv 移行**: pyproject.toml + uv.lock による再現可能な依存関係管理
+
+### 🔧 改善
+- 天気データソースの選択肢が増え、運用の柔軟性が向上
+- プロンプト管理の細かい制御が可能に
+- 開発環境の再現性が向上（uv）
+
+### ⚠️ 注意事項・既知の問題
+- locations.csv で新規追加した地点の緯度経度が 0.0, 0.0 の場合は、手動で設定する必要がある。0.0, 0.0 の地点は Open-Meteo では使用できない
+- 「両方」モードは2つのAPIを呼ぶため、応答時間がやや長くなる場合がある
+- どちらか一方が失敗しても、成功した方の結果は返す
+
+---
+
+## 📖 付録：v0.8.3 → v0.9.1 変更履歴概要
+
+### 天気予報まわり
+- ✅ locations.csv の新規作成と読み込み・キャッシュ
+- ✅ Open-Meteo API 統合（緯度経度指定）
+- ✅ 地名解決AIを気象庁用 / Open-Meteo用の2系統に分離し、プロンプトを設定可能に
+- ✅ weather.service で jma / open-meteo / both を選択可能に
+- ✅ 「両方」モードで結果を合成表示
+- ✅ 現在地の明示的サポート（WEATHER の w_location: "現在地"）
+
+### プロンプト管理
+- ✅ POST /api/settings/prompts/reset の追加（プロンプトごとリセット）
+- ✅ system_prompts.weather_jma_id / weather_coordinates の追加とUI連携
+
+### 依存関係
+- ✅ pyproject.toml の追加
+- ✅ uv.lock の追加（uv で管理）
+
+---
+
+## 📝 まとめ
+
+**DKISv0.9.1** は、v0.8.3のマルチデバイス対応・統計情報・UI/UXの基盤をそのまま活かしつつ、**天気予報のデータソースと地名解決**を拡張し、**プロンプトのきめ細かい管理**と**依存関係のモダン化**を実現したバージョンです。
+
+### v0.8.3 からの進化
+
+| 項目             | v0.8.3              | v0.9.1                                    |
+|------------------|---------------------|-------------------------------------------|
+| 天気API          | 気象庁のみ          | 気象庁 + Open-Meteo、選択可能・両方モード |
+| 地名解決         | 地名→気象庁IDのみ   | 地名→ID と 地名→緯度経度 の2系統、設定可能 |
+| プロンプトリセット | 全設定のみ          | プロンプトごと個別リセット可能             |
+| 依存関係         | requirements.txt 等 | uv + pyproject.toml + uv.lock             |
+
+### 到達レベル
+- **天気機能の拡張**: 複数データソースと緯度経度ベースの取得に対応
+- **設定の柔軟性**: プロンプト単位のリセットと天気用地名解決のカスタマイズ
+- **開発基盤**: 再現可能なビルドとモダンなパッケージ管理
+
+---
+
+**バージョン**: DKISv0.9.1  
+**開発期間**: 2025年1月  
+**ステータス**: 天気・プロンプト・uv 対応完了  
+**主な追加**: 天気API拡張、プロンプト個別リセット、uv移行  
+
+---
+
+**おわり**

@@ -1,0 +1,53 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist-eggs/
+eggs/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# === 仮想環境 ===
+.venv/
+venv/
+ENV/
+env/
+
+# === 認証・シークレット（重要） ===
+config.py
+.env
+.env.*
+!.env.example
+users.json
+
+# === キャッシュ・一時ファイル ===
+.cache/
+tts_cache/
+*.log
+*.tmp
+
+# === ユーザー設定・ログ（dist内） ===
+dist/settings.json
+dist/テキストログ/
+dist/メディアファイル/
+
+# === IDE・エディタ ===
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# === OS ===
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === その他 ===
+*.bak
+*.backup

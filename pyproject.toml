@@ -1,0 +1,38 @@
+[project]
+name = "dkis"
+version = "0.9.0"
+description = "DKIS - Flask ベースのチャットボットシステム「東北きりたん」"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    # Web フレームワーク
+    "flask>=3.0.0",
+    "flask-cors>=4.0.0",
+    
+    # AI / API クライアント
+    "openai>=1.0.0",
+    
+    # HTTP クライアント
+    "requests>=2.31.0",
+    
+    # Webスクレイピング（READ-PAGE用）
+    "trafilatura>=2.0.0",
+    
+    # Spotify API
+    "spotipy>=2.23.0",
+    
+    # 文字エンコーディング検出
+    "chardet>=5.0.0",
+]
+
+# 開発用の依存関係（uv 最新形式）
+[dependency-groups]
+dev = [
+    # 開発用の依存関係（必要に応じて追加）
+    # "pytest>=7.0.0",
+    # "ruff>=0.1.0",
+]
+
+[tool.uv]
+# アプリケーションとして実行するため、パッケージ化は不要
+package = false
