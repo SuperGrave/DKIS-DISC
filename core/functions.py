@@ -101,12 +101,14 @@ def list_files_command(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, 
     
     files = list_memory_files()
     file_list_str = json.dumps(files, ensure_ascii=False, indent=2)
+    dmis_log = "memoryフォルダ内のファイル一覧を取得。"
+    summary = f"ファイル一覧:\n{file_list_str}"
     
     # ユーザーへの応答とファイル一覧を返す
     if TEXT and TEXT != "none":
         speak_voicevox(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
         
-    return TEXT, f"ファイル一覧:\n{file_list_str}"
+    return TEXT, dmis_log, summary, files
 
 def write_text_command(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_usage=None):
     """テキストファイルを書き込むコマンド"""
@@ -1095,7 +1097,11 @@ def read_webpage(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_
 def read_text_file(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_usage=None):
     """
     テキストファイルを読み込んで、要約AIで必要な情報を抽出してRETRYに渡す
+    （memoryフォルダ限定）
     """
+    from core.file_manager import read_memory_file, FileManagerError
+    from core.gpt_handler import text_summary_ai
+    
     filename = args.get("filename", "").strip() if isinstance(args, dict) else ""
     if not filename:
         dmis_log = "テキストファイル読み込みコマンドが実行されたが、filenameが指定されず。"
@@ -1105,13 +1111,9 @@ def read_text_file(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, toke
     if TEXT and TEXT != "none":
         speak_voicevox(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
     
-    # ファイルパスを構築（dist/ファイル名）
-    filepath = os.path.join("dist", filename)
-    
     # ファイルを読み込み
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            file_content = f.read()
+        file_content, metadata = read_memory_file(filename)
     except FileNotFoundError:
         error_text = f"ファイル '{filename}' が見つかりません。"
         print(f"[READ-TEXT] エラー: {error_text}")
@@ -1138,7 +1140,13 @@ def read_text_file(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, toke
         # 要約AIで必要な情報を抽出
         user_input = get_last_user_input()
         kiritan_text = TEXT or "テキストファイルを読み込み中"
-        summary, summary_token_usage = text_summary_ai(file_content, kiritan_text, user_input)
+        
+        # メタデータの説明があればコンテキストに追加
+        context_info = ""
+        if metadata and "description" in metadata:
+            context_info = f"【ファイル説明】{metadata['description']}\n"
+            
+        summary, summary_token_usage = text_summary_ai(context_info + file_content, kiritan_text, user_input)
         original_len = len(file_content)
         summary_len = len(summary)
         dmis_log = f"テキストファイル『{filename}』の要約を生成。({original_len}文字→{summary_len}文字)"

@@ -82,10 +82,12 @@ HTML ページ上で表示されるキャラクター「東北きりたん」と
 - WEATHER: 天気情報を収集。RETRY 後に結果が入力される。{"w_location":"対象地名"}（現在地の天気を取得する場合は{"w_location":"現在地"}と指定すること）
 - READ-TEXT: テキストを読み込む。RETRY 後に要約された内容が入力される。{"filename":"sample1.txt"}
 - READ-PAGE: 指定URLのWebページ本文をスクレイピングして読み込む。RETRY 後に要約が入力される。{"url":"https://...", "summary": true}
+- LIST-FILES: dist/memory/内のファイル一覧を取得。RETRY 前提で使い、次ターンのRIに {"filename":"...", "description":"..."} の一覧が入力される。
+- WRITE-TEXT: テキストファイルを新規作成・上書き。{"filename":"tripmemo.txt", "content":"本文...", "description":"説明..."}
+- APPEND-TEXT: テキストファイルに追記。{"filename":"tripmemo.txt", "content":"追記内容..."}
   利用可能なファイル:
-  - system.txt: DKISシステムの仕組み・機能・制約の詳細説明
-  - favmusic.txt: マスターがお気に入りの曲のリスト(ボカロ以外)
-  - vocaloid.txt: マスターお気に入りのボカロ曲リスト
+  - LIST-FILES で dist/memory/ 内のファイル一覧を確認してください。
+  - 必要なファイルがあれば READ-TEXT で読み込んでください。
   【READ-TEXT使用指針】
   - 質問に答える・処理に必要な情報がテキストファイルにある場合は、確認無しで積極的に使用すること
 ※入力の対象地名は文脈から最適化してよい。
@@ -123,6 +125,7 @@ HTML ページ上で表示されるキャラクター「東北きりたん」と
 多段処理:
 1ターンで完結しない処理の場合、最初の出力で [ARGS-2]{"retry": true} を付与。
 次ターンの入力に検索要約や再度のテキストが挿入されるので、それをもとに次の処理を実行する。
+LIST-FILES も同様に retry=true で使い、取得した一覧は次ターンのRIで参照すること。
 例: 「夏っぽい曲かけて」
 STEP1: SEARCHで「夏 ボカロ曲」検索、retry=true
 STEP2: PLAY-MUSICで結果から曲を再生
@@ -210,6 +213,50 @@ SETTINGS_DEFAULT_FILE = Path("dist/settings_default.json")
 # 現在の設定を保持（メモリ上）
 _current_settings: Dict[str, Any] = {}
 _settings_lock = threading.Lock()
+_settings_file_mtime_ns = None
+_sync_in_progress = False
+
+
+def _get_settings_file_mtime_ns():
+    """settings.json の最終更新時刻を取得"""
+    try:
+        return SETTINGS_FILE.stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+def _mark_settings_file_synced():
+    """現在の settings.json の更新時刻をキャッシュする"""
+    global _settings_file_mtime_ns
+    _settings_file_mtime_ns = _get_settings_file_mtime_ns()
+
+
+def sync_settings_if_modified(reload_modules: bool = True) -> bool:
+    """
+    settings.json の外部変更を検知したら再読み込みする。
+    IDEで直接 settings.json を編集したケースに追従するための処理。
+    """
+    global _sync_in_progress
+
+    if _sync_in_progress or not SETTINGS_FILE.exists():
+        return False
+
+    current_mtime = _get_settings_file_mtime_ns()
+    with _settings_lock:
+        cached_mtime = _settings_file_mtime_ns
+
+    if cached_mtime is None or current_mtime is None or cached_mtime == current_mtime:
+        return False
+
+    _sync_in_progress = True
+    try:
+        print("[Settings] settings.json の外部変更を検知したため再読み込みします")
+        load_settings()
+        if reload_modules:
+            reload_all_modules()
+        return True
+    finally:
+        _sync_in_progress = False
 
 def get_default_settings() -> Dict[str, Any]:
     """
@@ -416,6 +463,8 @@ def load_settings() -> Dict[str, Any]:
     if changed and result:
         # 設定ファイルを最新の構造に追従させる
         save_settings(result)
+    else:
+        _mark_settings_file_synced()
     return result
 
 def save_settings(settings: Dict[str, Any]) -> bool:
@@ -434,6 +483,7 @@ def save_settings(settings: Dict[str, Any]) -> bool:
         print("[Settings] ⏳ 大きな設定データを処理中です。しばらくお待ちください...")
         with _settings_lock:
             _current_settings = settings.copy()
+            _mark_settings_file_synced()
         
         print(f"[Settings] 設定を保存しました: {SETTINGS_FILE}")
         return True
@@ -445,6 +495,7 @@ def save_settings(settings: Dict[str, Any]) -> bool:
 
 def get_current_settings() -> Dict[str, Any]:
     """現在の設定を取得"""
+    sync_settings_if_modified()
     with _settings_lock:
         return _current_settings.copy()
 
@@ -523,13 +574,14 @@ def reload_all_modules():
 def reset_to_default() -> bool:
     """設定をデフォルトに戻す"""
     default = get_default_settings()
-    return save_settings(default)
+    return update_settings(default)
 
 def get_setting(key_path: str, default=None):
     """
     ドット記法でネストした設定値を取得
     例: get_setting("ai_models.main") → "gpt-4.1-mini"
     """
+    sync_settings_if_modified()
     keys = key_path.split('.')
     value = _current_settings
     

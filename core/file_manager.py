@@ -23,20 +23,47 @@ def ensure_memory_dir():
     if not MEMORY_DIR.exists():
         MEMORY_DIR.mkdir(parents=True, exist_ok=True)
 
+
 def read_metadata(filepath):
-    """ファイルの1行目を読んでメタデータを取得"""
+    """ファイル先頭行のJSONメタデータを取得"""
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             first_line = f.readline().strip()
-            # JSONとしてパースを試みる
-            if first_line.startswith('{') and first_line.endswith('}'):
-                try:
-                    return json.loads(first_line)
-                except json.JSONDecodeError:
-                    pass
-            return None
+        if first_line.startswith('{') and first_line.endswith('}'):
+            return json.loads(first_line)
     except Exception:
-        return None
+        pass
+    return None
+
+def read_memory_file(filename):
+    """memoryフォルダ内のファイルを読み込む（メタデータ対応）"""
+    ensure_memory_dir()
+    # ファイル名のみを許可
+    filename = Path(filename).name
+    filepath = MEMORY_DIR / filename
+    
+    if not filepath.exists():
+        raise FileNotFoundError(f"File '{filename}' not found in memory.")
+        
+    with open(filepath, 'r', encoding='utf-8') as f:
+        content = f.read()
+        
+    # 1行目がJSONメタデータなら分離
+    metadata = None
+    body = content
+    
+    lines = content.split('\n', 1)
+    if len(lines) > 0:
+        first_line = lines[0].strip()
+        if first_line.startswith('{') and first_line.endswith('}'):
+            try:
+                metadata = json.loads(first_line)
+                body = lines[1] if len(lines) > 1 else ""
+            except json.JSONDecodeError:
+                pass
+                
+    return body, metadata
+
 
 def list_memory_files():
     """memoryフォルダ内のファイル一覧とメタデータを取得"""
