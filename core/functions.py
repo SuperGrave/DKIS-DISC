@@ -95,10 +95,54 @@ def save_log(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_usag
         speak_voicevox(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
     return TEXT, "テキストファイルとして会話ログを保存。"
 
-def _wdebug(msg: str):
-    # 環境変数 WEATHER_DEBUG=0 で無効化可能
-    if os.getenv("WEATHER_DEBUG", "1") != "0":
-        print("[WEATHER-DEBUG] " + str(msg), flush=True)
+def list_files_command(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_usage=None):
+    """ファイル一覧を取得するコマンド"""
+    from core.file_manager import list_memory_files
+    
+    files = list_memory_files()
+    file_list_str = json.dumps(files, ensure_ascii=False, indent=2)
+    
+    # ユーザーへの応答とファイル一覧を返す
+    if TEXT and TEXT != "none":
+        speak_voicevox(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
+        
+    return TEXT, f"ファイル一覧:\n{file_list_str}"
+
+def write_text_command(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_usage=None):
+    """テキストファイルを書き込むコマンド"""
+    from core.file_manager import write_text_file
+    
+    filename = args.get("filename")
+    content = args.get("content")
+    description = args.get("description")
+    
+    if not filename or not content:
+        return TEXT, "エラー: filename と content は必須です。"
+        
+    success, msg = write_text_file(filename, content, description)
+    
+    if TEXT and TEXT != "none":
+        speak_voicevox(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
+        
+    return TEXT, msg
+
+def append_text_command(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_usage=None):
+    """テキストファイルに追記するコマンド"""
+    from core.file_manager import append_text_file
+    
+    filename = args.get("filename")
+    content = args.get("content")
+    
+    if not filename or not content:
+        return TEXT, "エラー: filename と content は必須です。"
+        
+    success, msg = append_text_file(filename, content)
+    
+    if TEXT and TEXT != "none":
+        speak_voicevox(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
+        
+    return TEXT, msg
+
 
 def google_search_summary(query, note, history_text, search_result):
     base_prompt = get_prompt_setting("search_summary")

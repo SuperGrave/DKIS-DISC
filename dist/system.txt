@@ -65,6 +65,19 @@ DKIS（Drive Kiritan to Issho System）は、Flaskベースのチャットボッ
 11. SAVE-LOG - 会話履歴をtxtファイルに保存
    - dist/テキストログ/ に chatlog_YYYYMMDD_HHMMSS.txt 形式で保存
 
+12. LIST-FILES - ファイル一覧の確認
+   - dist/memory/ フォルダ内のファイル一覧を取得
+   - ファイル名と説明（メタデータ）のリストが返される
+
+13. WRITE-TEXT - テキストファイルの新規作成・上書き
+   - dist/memory/ フォルダにファイルを保存
+   - {"filename":"tripmemo.txt", "content":"本文...", "description":"旅のメモ"}
+   - descriptionを指定すると、1行目にメタデータとして保存される
+
+14. APPEND-TEXT - テキストファイルへの追記
+   - 既存ファイルの末尾に追記
+   - {"filename":"tripmemo.txt", "content":"追記内容..."}
+
 ■ 重要な制約
 
 【音声合成の分割処理】

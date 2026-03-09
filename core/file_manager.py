@@ -12,10 +12,88 @@ import shutil
 
 # distフォルダのパス
 DIST_ROOT = Path("./dist").resolve()
+MEMORY_DIR = DIST_ROOT / "memory"
 
 class FileManagerError(Exception):
     """ファイルマネージャー関連のエラー"""
     pass
+
+def ensure_memory_dir():
+    """memoryフォルダが存在しない場合は作成"""
+    if not MEMORY_DIR.exists():
+        MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+
+def read_metadata(filepath):
+    """ファイルの1行目を読んでメタデータを取得"""
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            first_line = f.readline().strip()
+            # JSONとしてパースを試みる
+            if first_line.startswith('{') and first_line.endswith('}'):
+                try:
+                    return json.loads(first_line)
+                except json.JSONDecodeError:
+                    pass
+            return None
+    except Exception:
+        return None
+
+def list_memory_files():
+    """memoryフォルダ内のファイル一覧とメタデータを取得"""
+    ensure_memory_dir()
+    files = []
+    try:
+        for p in MEMORY_DIR.glob('*.txt'):
+            if p.is_file():
+                metadata = read_metadata(p)
+                description = metadata.get('description', 'No description') if metadata else 'No metadata'
+                files.append({
+                    "filename": p.name,
+                    "description": description
+                })
+    except Exception as e:
+        print(f"[FileManager] Error listing memory files: {e}")
+    return files
+
+def write_text_file(filename, content, description=None):
+    """テキストファイルを書き込む（メタデータ付き）"""
+    ensure_memory_dir()
+    # ファイル名のみを許可（パス区切りを含まない）
+    filename = Path(filename).name
+    filepath = MEMORY_DIR / filename
+    
+    try:
+        with open(filepath, 'w', encoding='utf-8') as f:
+            if description:
+                metadata = json.dumps({"description": description}, ensure_ascii=False)
+                f.write(f"{metadata}\n")
+            f.write(content)
+        return True, f"File '{filename}' written successfully."
+    except Exception as e:
+        return False, str(e)
+
+def append_text_file(filename, content):
+    """テキストファイルに追記する"""
+    ensure_memory_dir()
+    filename = Path(filename).name
+    filepath = MEMORY_DIR / filename
+    
+    if not filepath.exists():
+        return False, f"File '{filename}' does not exist."
+        
+    try:
+        with open(filepath, 'a', encoding='utf-8') as f:
+            # 末尾が改行で終わっていない場合は改行を追加
+            if filepath.stat().st_size > 0:
+                with open(filepath, 'rb') as fr:
+                    fr.seek(-1, 2)
+                    if fr.read(1) != b'\n':
+                        f.write('\n')
+            f.write(content)
+        return True, f"Appended to '{filename}' successfully."
+    except Exception as e:
+        return False, str(e)
+
 
 def validate_path(user_path):
     """

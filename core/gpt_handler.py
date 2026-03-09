@@ -12,7 +12,8 @@ from core.context_provider import (
 from core.functions import (
     chat_response, save_log,
     search_google, search_news, play_music_from_spotify, play_youtube, get_weather,
-    pause_music, resume_music, read_text_file, read_webpage
+    pause_music, resume_music, read_text_file, read_webpage,
+    list_files_command, write_text_command, append_text_command
 )
 from core.voicevox_handler import speak_voicevox  # 未対応コマンド時の音声用
 from core.logger import append_log_pretty  # 新ロガー（#n / USER INPUT / AI RAW / RETRY 対応）
@@ -165,6 +166,9 @@ command_handlers = {
     "WEATHER": get_weather,
     "READ-TEXT": read_text_file,
     "READ-PAGE": read_webpage,
+    "LIST-FILES": list_files_command,
+    "WRITE-TEXT": write_text_command,
+    "APPEND-TEXT": append_text_command,
 }
 
 def ask_chatgpt(user_text: str) -> tuple[str, dict | None]:
