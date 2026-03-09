@@ -610,13 +610,13 @@ synth_q = PriorityQueue()   # (priority, enqueue_time, (utter_id, seg_no, text, 
 _synthesis_start_time = None
 _synthesis_utter_id = None
 
-def enqueue_utterance(text: str, turn_id: str = "0", emotion="(無)", priority=0, volume=1.0, ai_raw: str = None, processing_time: float = 0.0, token_usage: dict = None):
-    """発話をキュー投入し、即座に reply(utter_id付) を送る。"""
+def enqueue_utterance(text: str, turn_id: str = "0", emotion="(無)", priority=0, volume=1.0, ai_raw: str = None, processing_time: float = 0.0, token_usage: dict = None, silent: bool = False):
+    """発話をキュー投入し、即座に reply(utter_id付) を送る。silent=Trueなら音声合成はスキップ。"""
     utter_id = next(_utter_seq)
     
     # 音声合成開始時刻を記録（最初のutteranceのみ）
     global _synthesis_start_time, _synthesis_utter_id
-    if _synthesis_start_time is None:
+    if _synthesis_start_time is None and not silent:
         _synthesis_start_time = time.time()
         _synthesis_utter_id = utter_id
 
@@ -627,8 +627,8 @@ def enqueue_utterance(text: str, turn_id: str = "0", emotion="(無)", priority=0
     if _increment_stat_func:
         _increment_stat_func("kiritan_replies")
     
-    # ミュート時はreplyのみ送信して音声合成はスキップ
-    if is_muted: 
+    # silent=True または ミュート時はreplyのみ送信して音声合成はスキップ
+    if silent or is_muted: 
         return
     
     segs = chunk_text_for_tts(text)  # 動的に設定から取得
@@ -781,4 +781,4 @@ def speak_voicevox(text, silent=False, ai_raw=None, processing_time=0.0, token_u
     
     ensure_workers()
     # ミュート時もenqueue_utteranceは呼ぶ（内部でreplyを送信してから合成をスキップする）
-    enqueue_utterance(clean_text, turn_id="0", emotion="(無)", priority=0, volume=1.0, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
+    enqueue_utterance(clean_text, turn_id="0", emotion="(無)", priority=0, volume=1.0, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage, silent=silent)

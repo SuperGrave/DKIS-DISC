@@ -297,6 +297,12 @@ def execute_command(parsed: dict, user_input: str, ai_raw: str = None, processin
     args = parsed.get("ARGS", {})
     TEXT = parsed.get("TEXT", "")
 
+    # パース失敗検知（CMDがなく、TEXTも空で、でも元のAI出力はある場合）
+    if parsed.get("CMD") is None and not TEXT and ai_raw and ai_raw.strip():
+        error_msg = f"（AI出力エラー：無効なフォーマットを検知しました）\n\n[RAW OUTPUT]\n{ai_raw}"
+        speak_voicevox(error_msg, silent=True, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
+        return error_msg, False, "AI出力パースエラー", error_msg, None, None
+
     if not isinstance(args, dict):
         args = {}
 
