@@ -1099,8 +1099,7 @@ def read_text_file(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, toke
     テキストファイルを読み込んで、要約AIで必要な情報を抽出してRETRYに渡す
     （memoryフォルダ限定）
     """
-    from core.file_manager import read_memory_file, FileManagerError
-    from core.gpt_handler import text_summary_ai
+    from core.file_manager import read_memory_file
     
     filename = args.get("filename", "").strip() if isinstance(args, dict) else ""
     if not filename:
