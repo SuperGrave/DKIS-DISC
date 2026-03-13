@@ -53,19 +53,19 @@
   },
   "search": {
     "result_count": 5,
-    "use_raw_result": false,
+    "use_raw_result": true,
     "server_priority": false
   },
   "news": {
     "max_items": 10,
-    "use_raw_result": false,
+    "use_raw_result": true,
     "server_priority": false
   },
   "webpage": {
-    "use_raw_result": false
+    "use_raw_result": true
   },
   "text": {
-    "use_raw_result": false
+    "use_raw_result": true
   },
   "spotify": {
     "auto_auth": true,
@@ -75,8 +75,8 @@
   },
   "youtube": {
     "selection_mode": "ai_auto",
-    "max_items": 5,
     "server_priority": false,
+    "max_items": 5,
     "send_selection_to_main_loop": true
   },
   "weather": {
@@ -105,7 +105,7 @@
     "max_history": 5,
     "ai_loop_mode": "main",
     "chat_only_max_history": 5,
-    "reset_history_on_prompt_change": true
+    "reset_history_on_prompt_change": false
   },
   "input_format": {
     "main": {
