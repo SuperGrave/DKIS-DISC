@@ -3,6 +3,11 @@ import queue
 import time
 from flask import Blueprint, request, jsonify, Response, session
 
+try:
+    from config import SSE_KEEPALIVE_INTERVAL  # 秒
+except Exception:
+    SSE_KEEPALIVE_INTERVAL = 10
+
 
 def create_sse_blueprint(deps: dict) -> Blueprint:
     bp = Blueprint("sse_routes", __name__)
@@ -130,7 +135,7 @@ def create_sse_blueprint(deps: dict) -> Blueprint:
             try:
                 while True:
                     try:
-                        ev, payload = client_queue.get(timeout=10)
+                        ev, payload = client_queue.get(timeout=SSE_KEEPALIVE_INTERVAL)
                         yield f"event: {ev}\n"
                         yield f"data: {payload}\n\n"
                     except queue.Empty:
@@ -146,6 +151,7 @@ def create_sse_blueprint(deps: dict) -> Blueprint:
                     remaining_count = len(event_queues)
                 app.logger.info(f"[SSE] ❌ クライアント切断: {client_info_str}（残り{remaining_count}接続）")
                 send_clients_list()
+                send_system_status()
 
         return Response(event_stream(), content_type="text/event-stream")
 

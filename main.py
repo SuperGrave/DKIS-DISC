@@ -187,9 +187,10 @@ def get_statistics():
 # ===== クライアントリスト・システム状態の定期配信スレッドを起動 =====
 def start_clients_broadcast():
     """クライアントリスト・システム状態配信スレッドを起動"""
+    from config import SYSTEM_STATUS_BROADCAST_INTERVAL
     broadcast_thread = Thread(target=broadcast_clients_periodically, daemon=True)
     broadcast_thread.start()
-    print("[SSE] クライアントリスト・システム状態の定期配信を開始（60秒間隔）")
+    print(f"[SSE] クライアントリスト・システム状態の定期配信を開始（{SYSTEM_STATUS_BROADCAST_INTERVAL}秒間隔）")
 
 # ===== Flask 準備 =====
 app = Flask(__name__)
