@@ -103,6 +103,7 @@ def create_sse_blueprint(deps: dict) -> Blueprint:
             "device_type": device_type,
             "connected_at": __import__("datetime").datetime.now().strftime("%H:%M:%S"),
             "user_id": user_id,
+            "last_seen_ts": time.time(),
         }
         client_info_str = f"{client_ip}:{client_port} ({device_type}/{os}/{browser}) - ユーザー: {user_id}"
 
@@ -186,6 +187,52 @@ def create_sse_blueprint(deps: dict) -> Blueprint:
             reply_data["token_usage"] = token_usage
         send_event("reply", reply_data)
         return jsonify({"ok": True})
+
+    @bp.route("/notify/client_heartbeat", methods=["POST"], endpoint="notify_client_heartbeat")
+    @login_required
+    def notify_client_heartbeat_route():
+        data = request.get_json(silent=True) or {}
+        client_id = data.get("client_id")
+        if not client_id:
+            return jsonify({"ok": False, "error": "missing client_id"}), 400
+
+        now = time.time()
+        found = False
+        with event_queues_lock:
+            for info in client_info_list:
+                if info.get("id") == client_id:
+                    info["last_seen_ts"] = now
+                    found = True
+                    break
+        return jsonify({"ok": True, "found": found})
+
+    @bp.route("/notify/client_disconnect", methods=["POST"], endpoint="notify_client_disconnect")
+    @login_required
+    def notify_client_disconnect_route():
+        data = request.get_json(silent=True) or {}
+        client_id = data.get("client_id")
+        if not client_id:
+            return jsonify({"ok": False, "error": "missing client_id"}), 400
+
+        removed_client = None
+        with event_queues_lock:
+            for i, info in enumerate(client_info_list):
+                if info.get("id") != client_id:
+                    continue
+                removed_client = client_info_list.pop(i)
+                if i < len(event_queues):
+                    event_queues.pop(i)
+                break
+
+        if removed_client:
+            app.logger.info(
+                f"[SSE] 🔌 クライアント明示切断: {removed_client.get('ip')}:{removed_client.get('port')} "
+                f"id={removed_client.get('id')}"
+            )
+            send_clients_list()
+            send_system_status()
+
+        return jsonify({"ok": True, "removed": bool(removed_client)})
 
     @bp.route("/notify/synth_start", methods=["POST"], endpoint="notify_synth_start_handler")
     def notify_synth_start_handler_route():

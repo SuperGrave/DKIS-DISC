@@ -209,6 +209,17 @@ event_queues_lock = Lock()
 app.logger.setLevel(logging.INFO)
 logging.getLogger("werkzeug").setLevel(logging.INFO)
 
+
+class _SuppressHeartbeatAccessLogFilter(logging.Filter):
+    """heartbeat系のアクセスログだけを抑制する"""
+    def filter(self, record):
+        message = record.getMessage()
+        return "/notify/client_heartbeat" not in message
+
+
+_werkzeug_logger = logging.getLogger("werkzeug")
+_werkzeug_logger.addFilter(_SuppressHeartbeatAccessLogFilter())
+
 CORS(app)
 
 # 認証システムの初期化
@@ -314,8 +325,64 @@ set_voicevox_error_sender(send_error_event)
 set_gpt_error_sender(send_error_event)
 set_chat_loop_error_sender(send_error_event)
 
+def prune_stale_clients():
+    """heartbeatが途絶えたクライアントを削除する"""
+    try:
+        from config import SSE_CLIENT_STALE_TIMEOUT
+        stale_timeout = max(3, int(SSE_CLIENT_STALE_TIMEOUT))
+    except Exception:
+        stale_timeout = 12
+
+    now = time.time()
+    removed = []
+    with event_queues_lock:
+        for i in range(len(client_info_list) - 1, -1, -1):
+            info = client_info_list[i]
+            last_seen_ts = info.get("last_seen_ts", now)
+            if now - last_seen_ts <= stale_timeout:
+                continue
+
+            removed_info = client_info_list.pop(i)
+            if i < len(event_queues):
+                event_queues.pop(i)
+            removed.append(removed_info)
+
+    for info in removed:
+        app.logger.info(
+            f"[SSE] ♻️ stale client removed: {info.get('ip')}:{info.get('port')} "
+            f"id={info.get('id')} (last_seen={info.get('last_seen_ts')})"
+        )
+    return len(removed)
+
+
+_last_clients_signature = None
+_last_clients_log_ts = 0.0
+_CLIENTS_STABLE_LOG_INTERVAL_SEC = 30
+
+
+def _log_clients_state(clients):
+    """クライアント状態ログを抑制しつつ可読性を保つ"""
+    global _last_clients_signature, _last_clients_log_ts
+
+    signature = tuple(client.get("id", "unknown") for client in clients)
+    now = time.time()
+    is_changed = signature != _last_clients_signature
+
+    if is_changed:
+        app.logger.info(f"[SSE] クライアント状態更新: {len(clients)}台")
+        for i, client in enumerate(clients):
+            app.logger.info(f"[SSE] クライアント{i+1}: {client}")
+        _last_clients_signature = signature
+        _last_clients_log_ts = now
+        return
+
+    if now - _last_clients_log_ts >= _CLIENTS_STABLE_LOG_INTERVAL_SEC:
+        app.logger.info(f"[SSE] クライアント監視中: 変化なし（{len(clients)}台接続）")
+        _last_clients_log_ts = now
+
 def send_clients_list():
     """接続中のクライアント一覧を全クライアントに送信"""
+    prune_stale_clients()
     with event_queues_lock:
         clients = []
         for i, info in enumerate(client_info_list):
@@ -333,12 +400,8 @@ def send_clients_list():
         
         # clients_listイベントを送信（重複チェックなし）
         payload = {"type": "clients_list", "clients": clients, "total": len(clients)}
-        
-        # デバッグ用ログ（0台のときはスキップ）
-        if clients:
-            app.logger.info(f"[SSE] クライアントリスト送信: {len(clients)}台")
-            for i, client in enumerate(clients):
-                app.logger.info(f"[SSE] クライアント{i+1}: {client}")
+
+        _log_clients_state(clients)
         
         event_data = ("clients_list", json.dumps(payload))
         
@@ -352,11 +415,10 @@ def _build_system_status_payload(force_update=False):
     """システム状態のペイロードを構築"""
     from core.spotify_handler import get_keepalive_status, update_keepalive_status_now, get_current_track_info
     from core.voicevox_handler import check_voicevox_status
-    
+
+    prune_stale_clients()
     with event_queues_lock:
         clients = []
-        if client_info_list:
-            app.logger.info(f"[SSE] _build_system_status_payload: client_info_list = {client_info_list}")
         for i, info in enumerate(client_info_list):
             client_data = {
                 "index": i + 1,
@@ -369,7 +431,6 @@ def _build_system_status_payload(force_update=False):
                 "connected_at": info["connected_at"],
                 "user_id": info.get("user_id", "ゲスト")
             }
-            app.logger.info(f"[SSE] _build_system_status_payload: クライアント{i+1} = {client_data}")
             clients.append(client_data)
     
     # Spotify状態を取得
