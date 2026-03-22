@@ -72,6 +72,11 @@ def reload_functions_settings():
     except Exception as e:
         print(f"[Functions] 設定リロードエラー: {e}")
 
+
+def _wdebug(message: str):
+    """天気コマンド用の簡易デバッグ出力"""
+    print(f"[WEATHER] {message}")
+
 _openai_client = None
 def _get_openai():
     global _openai_client
