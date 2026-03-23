@@ -2,6 +2,21 @@ from flask import Flask, request, jsonify, send_file, Response, send_from_direct
 from flask_cors import CORS
 from werkzeug.serving import WSGIRequestHandler
 from functools import wraps
+import sys
+
+
+def _force_utf8_console():
+    """Windowsのcp932環境でも絵文字ログで落ちないようにする。"""
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream and hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
+_force_utf8_console()
 
 # ==== 設定は config.py に集約 ====
 from config import (

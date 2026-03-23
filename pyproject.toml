@@ -1,6 +1,6 @@
 [project]
 name = "dkis"
-version = "0.9.3"
+version = "0.9.4"
 description = "DKIS - Flask ベースのチャットボットシステム「東北きりたん」"
 readme = "README.md"
 requires-python = ">=3.10"
