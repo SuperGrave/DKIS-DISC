@@ -15,6 +15,7 @@ from config import (
     WEATHER_API_TIMEOUT          # API タイムアウト
 )
 from core.settings_manager import get_prompt_setting
+from core.utils import normalize_location_text
 
 # 同梱ファイルの場所（デフォルトはこのファイルと同じディレクトリ）
 # 配布先で場所を変えたい場合は環境変数 PRIMARY_AREA_XML で上書き可
@@ -33,10 +34,10 @@ def _parse_rows_from_xml(p: Path) -> List[Tuple[str, str, str]]:
     rows: List[Tuple[str, str, str]] = []
     # <pref title="都道府県"> … <city id="xxxxx" title="都市名"> or <city id="xxxxx"><title>都市名</title>
     for pref in root.iter("pref"):
-        pref_name = (pref.attrib.get("title") or pref.findtext("title") or "").strip()
+        pref_name = normalize_location_text(pref.attrib.get("title") or pref.findtext("title") or "")
         for city in pref.iter("city"):
             cid = (city.attrib.get("id") or (city.findtext("id") or "")).strip()
-            title = (city.attrib.get("title") or city.findtext("title") or "").strip()
+            title = normalize_location_text(city.attrib.get("title") or city.findtext("title") or "")
             if cid and title:
                 rows.append((pref_name, title, cid))
     return rows
@@ -47,8 +48,8 @@ def _parse_rows_from_csv(p: Path) -> List[Tuple[str, str, str]]:
         r = csv.DictReader(f)
         # 期待ヘッダ: pref, title, city_id
         for row in r:
-            pref = (row.get("pref") or "").strip()
-            title = (row.get("title") or "").strip()
+            pref = normalize_location_text(row.get("pref") or "")
+            title = normalize_location_text(row.get("title") or "")
             cid = (row.get("city_id") or "").strip()
             if cid and title:
                 rows.append((pref, title, cid))

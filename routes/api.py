@@ -252,19 +252,65 @@ def create_api_blueprint(deps: dict) -> Blueprint:
         send_event("tts_enabled_changed", {"enabled": enabled})
         return jsonify({"ok": True, "enabled": enabled})
 
+    @bp.route("/voicevox/user_dict", methods=["GET"], endpoint="voicevox_user_dict_list")
+    @role_required("operator")
+    def voicevox_user_dict_list_route():
+        from core.voicevox_handler import list_voicevox_dict_words
+
+        words = list_voicevox_dict_words()
+        return jsonify({"ok": True, "words": words})
+
+    @bp.route("/voicevox/user_dict", methods=["POST"], endpoint="voicevox_user_dict_add")
+    @role_required("operator")
+    def voicevox_user_dict_add_route():
+        from core.voicevox_handler import add_voicevox_dict_word
+
+        data = request.get_json(force=True) or {}
+        surface = (data.get("surface") or "").strip()
+        pronunciation = (data.get("pronunciation") or "").strip()
+        accent_type = data.get("accent_type", 1)
+        priority = data.get("priority", 5)
+
+        if not surface or not pronunciation:
+            return jsonify({"ok": False, "error": "surface と pronunciation は必須です。"}), 400
+
+        try:
+            word = add_voicevox_dict_word(surface, pronunciation, accent_type, priority)
+            return jsonify({"ok": True, "word": word})
+        except ValueError as e:
+            return jsonify({"ok": False, "error": str(e)}), 400
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    @bp.route("/voicevox/user_dict/<word_uuid>", methods=["DELETE"], endpoint="voicevox_user_dict_delete")
+    @role_required("operator")
+    def voicevox_user_dict_delete_route(word_uuid):
+        from core.voicevox_handler import delete_voicevox_dict_word
+
+        try:
+            delete_voicevox_dict_word(word_uuid)
+            return jsonify({"ok": True})
+        except ValueError as e:
+            return jsonify({"ok": False, "error": str(e)}), 400
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
     @bp.route("/set_location", methods=["POST"], endpoint="set_location")
     @login_required
     def set_location_route():
+        from core.utils import normalize_location_text
+
         data = request.get_json(force=True) or {}
         print(YELLOW_BRIGHT + f"[GPS]位置情報受信         " + RESET + str(data))
 
         if "location" in data and data["location"]:
             lat = data.get("lat")
             lon = data.get("lon")
+            location_text = normalize_location_text(data["location"])
             if lat is not None and lon is not None:
-                set_current_location(data["location"], lat=float(lat), lon=float(lon))
+                set_current_location(location_text, lat=float(lat), lon=float(lon))
             else:
-                set_current_location(data["location"])
+                set_current_location(location_text)
             print(YELLOW_BRIGHT + "[GPS]位置情報手動入力     " + RESET + get_current_location())
             return jsonify({"ok": True, "location": get_current_location()})
 
@@ -273,7 +319,7 @@ def create_api_blueprint(deps: dict) -> Blueprint:
                 lat = float(data["lat"])
                 lon = float(data["lon"])
                 address, elapsed = latlon_to_address(lat, lon, muniCd_dict)
-                municipality = address
+                municipality = normalize_location_text(address)
                 set_current_location(municipality, lat=lat, lon=lon)
             except Exception as e:
                 print(YELLOW_BRIGHT + f"[GPS]位置情報処理エラー:{e}" + RESET)

@@ -80,6 +80,85 @@ def check_voicevox_status():
             "error": str(e)
         }
 
+
+def _voicevox_request(path: str, *, method: str = "GET", params: dict | None = None, json_data: dict | None = None):
+    url = get_current_voicevox_url().rstrip("/")
+    timeout = max(
+        3,
+        int(max(
+            get_current_voicevox_version_timeout(),
+            get_current_tts_query_timeout(),
+        )),
+    )
+    response = requests.request(
+        method,
+        f"{url}{path}",
+        params=params,
+        json=json_data,
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    return response
+
+
+def list_voicevox_dict_words() -> list[dict]:
+    """VOICEVOXユーザー辞書の一覧を取得して表示しやすい配列へ整形。"""
+    try:
+        response = _voicevox_request("/user_dict")
+        payload = response.json() or {}
+        words = []
+        for word_uuid, item in payload.items():
+            if not isinstance(item, dict):
+                continue
+            words.append({
+                "uuid": word_uuid,
+                "surface": item.get("surface", ""),
+                "pronunciation": item.get("pronunciation", ""),
+                "accent_type": item.get("accent_type", 0),
+                "word_type": item.get("word_type", ""),
+                "priority": item.get("priority", 5),
+            })
+        words.sort(key=lambda item: (str(item.get("surface") or ""), str(item.get("pronunciation") or "")))
+        return words
+    except Exception as e:
+        _send_voicevox_error("voicevox_dictionary", "VoiceVox辞書一覧の取得に失敗しました", str(e))
+        raise
+
+
+def add_voicevox_dict_word(surface: str, pronunciation: str, accent_type: int, priority: int = 5) -> dict:
+    """VOICEVOXユーザー辞書へ単語を追加する。"""
+    params = {
+        "surface": (surface or "").strip(),
+        "pronunciation": (pronunciation or "").strip(),
+        "accent_type": int(accent_type),
+        "priority": max(0, min(10, int(priority))),
+    }
+    if not params["surface"] or not params["pronunciation"]:
+        raise ValueError("surface と pronunciation は必須です。")
+
+    try:
+        response = _voicevox_request("/user_dict_word", method="POST", params=params)
+        result = response.json() if response.content else {}
+        return {
+            "uuid": result.get("word_uuid") or result.get("uuid") or "",
+            **params,
+        }
+    except Exception as e:
+        _send_voicevox_error("voicevox_dictionary", "VoiceVox辞書登録に失敗しました", str(e))
+        raise
+
+
+def delete_voicevox_dict_word(word_uuid: str) -> None:
+    """VOICEVOXユーザー辞書から単語を削除する。"""
+    if not (word_uuid or "").strip():
+        raise ValueError("word_uuid は必須です。")
+
+    try:
+        _voicevox_request("/user_dict_word", method="DELETE", params={"word_uuid": word_uuid.strip()})
+    except Exception as e:
+        _send_voicevox_error("voicevox_dictionary", "VoiceVox辞書削除に失敗しました", str(e))
+        raise
+
 # ====== 感情タグ除去 ======
 def remove_emotion_tag(text: str) -> str:
     """

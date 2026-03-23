@@ -3,6 +3,7 @@ import requests
 import csv
 import time
 import json
+import unicodedata
 from datetime import datetime, timedelta
 from xml.etree import ElementTree
 from urllib.parse import quote_plus, quote, urlparse, parse_qs
@@ -56,6 +57,20 @@ def reload_utils_settings():
 def sanitize_text(text):
     """テキストをクリーンに整形"""
     return re.sub(r"\s{2,}", " ", text.replace("\n", " ")).strip()
+
+
+def normalize_location_text(text: str) -> str:
+    """位置情報文字列向けの正規化。不可視文字や文字化け混入を抑える。"""
+    if text is None:
+        return ""
+
+    s = unicodedata.normalize("NFKC", str(text))
+    # 置換文字・BOM・ゼロ幅系・私用領域を除去
+    s = re.sub(r"[\uFFFD\uFEFF\u200B-\u200D\u2060\uE000-\uF8FF]", "", s)
+    # 制御文字を除去（改行・タブは位置情報では不要なのでまとめて落とす）
+    s = "".join(ch for ch in s if unicodedata.category(ch)[0] != "C")
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
 
 def print_color(text, color=GREEN):
     """色付きで出力（デフォルト緑）"""
@@ -377,7 +392,7 @@ def load_muniCd_dict(csv_path: str) -> dict:
         reader = csv.DictReader(f)
         for row in reader:
             raw = str(row["muniCd"]).strip()
-            name = row["chiriin_city_name"].strip()
+            name = normalize_location_text(row["chiriin_city_name"])
             # ゼロ詰め/非ゼロ詰めの両対応
             mapping[raw] = name
             mapping[raw.zfill(5)] = name
@@ -423,14 +438,15 @@ def latlon_to_address(lat: float, lon: float, muniCd_dict: dict, timeout: int = 
     res = js.get("results", {}) or {}
 
     muni_cd = str(res.get("muniCd", "")).strip()
-    detail = "".join([res.get(k, "") for k in ("lv01Nm", "lv02Nm", "lv03Nm")])
+    detail = normalize_location_text("".join([res.get(k, "") for k in ("lv01Nm", "lv02Nm", "lv03Nm")]))
 
     keys = (muni_cd, muni_cd.zfill(5), muni_cd.lstrip("0"))
     city = _pick(muniCd_dict.get(keys[0]),
                  muniCd_dict.get(keys[1]),
                  muniCd_dict.get(keys[2]))
+    city = normalize_location_text(city)
 
-    pref = _pref_name_from_muniCd(muni_cd)
+    pref = normalize_location_text(_pref_name_from_muniCd(muni_cd))
 
     if city:
         # 市/区はプレフィックスなし、町/村や郡を含む場合は都道府県を付ける
@@ -440,5 +456,6 @@ def latlon_to_address(lat: float, lon: float, muniCd_dict: dict, timeout: int = 
         full_addr = (pref + detail) if (pref and detail) else (detail or "（住所不明）")
 
     elapsed = time.time() - t0
+    full_addr = normalize_location_text(full_addr) or "（住所不明）"
     print(YELLOW_BRIGHT + "[GPS]位置情報自動入力     " + RESET + full_addr )
     return full_addr, elapsed

@@ -2,6 +2,7 @@ from datetime import datetime, timezone, timedelta
 import re
 import threading
 from typing import Optional, Tuple
+from core.utils import normalize_location_text
 
 _loc_lock = threading.Lock()
 _current_location = "（現在地未設定）"
@@ -57,7 +58,7 @@ def get_last_user_input() -> str:
 def set_current_location(text: str, lat: Optional[float] = None, lon: Optional[float] = None) -> None:
     """現在地（市区町村などの短い文字列）と緯度経度を更新。"""
     global _current_location, _current_latitude, _current_longitude
-    s = "（現在地未設定）" if text is None else re.sub(r"\s+", " ", str(text)).strip()
+    s = "（現在地未設定）" if text is None else normalize_location_text(text)
     if not s:
         s = "（現在地未設定）"
     if len(s) > 100:

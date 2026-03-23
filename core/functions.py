@@ -6,6 +6,7 @@ from core.utils import (
     resolve_google_news_url,
     search_youtube_videos,
     build_youtube_embed_url,
+    normalize_location_text,
 )
 from core.scraper import scrape_webpage
 from core.spotify_handler import search_and_play, pause_playback, resume_playback
@@ -409,6 +410,7 @@ def _build_weather_text_open_meteo(weather_data: dict, location_name: str) -> st
 
 def _get_weather_jma(place: str):
     """気象庁APIから天気を取得（内部関数）"""
+    place = normalize_location_text(place)
     if not place:
         place = "札幌"
     
@@ -451,6 +453,8 @@ def _get_weather_jma(place: str):
 
 def _get_weather_open_meteo_from_place(place: str, location_name: str = None, lat: float = None, lon: float = None):
     """Open-Meteo APIから天気を取得（内部関数、現在地または地名指定）"""
+    place = normalize_location_text(place)
+    location_name = normalize_location_text(location_name or "")
     if lat is None or lon is None:
         if not place:
             return None, None, "地名が指定されていません。"
@@ -500,7 +504,7 @@ def get_weather(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_u
 
     place = ""
     if isinstance(args, dict):
-        place = (args.get("w_location") or "").strip()
+        place = normalize_location_text(args.get("w_location") or "")
 
     # 進捗アナウンスを"先に"出す（音声のみ。/reply直叩きはしない）
     if TEXT and TEXT != "none":
@@ -523,7 +527,7 @@ def get_weather(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_u
         # 気象庁APIから取得
         if is_current_location:
             # 現在地の場合：現在地の地名を使って気象庁APIを取得
-            current_name = get_current_location()
+            current_name = normalize_location_text(get_current_location())
             jma_summary, jma_log, jma_error = _get_weather_jma(current_name)
         else:
             # 地名指定の場合：指定地名から気象庁APIを取得
@@ -533,7 +537,7 @@ def get_weather(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_u
         if is_current_location:
             # 現在地の場合：現在地の緯度経度でOpen-Meteo APIを取得
             lat, lon = get_current_coordinates()
-            location_name = get_current_location()
+            location_name = normalize_location_text(get_current_location())
             if has_coordinates() and lat is not None and lon is not None:
                 om_summary, om_log, om_error = _get_weather_open_meteo_from_place("", location_name, lat, lon)
             else:
@@ -585,7 +589,7 @@ def get_weather(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_u
         
         if is_current_location:
             lat, lon = get_current_coordinates()
-            location_name = get_current_location()
+            location_name = normalize_location_text(get_current_location())
             if not has_coordinates() or lat is None or lon is None:
                 fail = "現在地の緯度経度が設定されていません。GPSで位置情報を取得するか、地名を指定してください。"
                 _wdebug("Open-Meteo: 緯度経度未設定（現在地指定）")
