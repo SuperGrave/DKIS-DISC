@@ -26,6 +26,7 @@ config.py
 users.json
 
 # === キャッシュ・一時ファイル ===
+.cache
 .cache/
 tts_cache/
 *.log
