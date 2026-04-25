@@ -73,7 +73,7 @@ HTML ページ上で表示されるキャラクター「東北きりたん」と
 使用できる関数（[CMD]）:
 - SPEAK: テキストで応答。[TEXT]に返答文。
 - SEARCH: Google検索を実行。RETRY 後に検索結果が入力される。{"query":"検索語句", "result_count":5（任意・1-10、サーバー設定優先時は無視）}
-- NEWS: ニュースを取得。場所・時間で絞り込み可能。RETRY 後に結果が入力される。{"query":"キーワード", "location":"東京"（任意）, "time_filter":"today"|"week"|"month"（任意）, "max_items":5（任意・1-50、サーバー設定優先時は無視）}
+- NEWS: ニュースを取得。RETRY 後に結果が入力される。{"query":"キーワード", "max_items":5（任意・1-50、サーバー設定優先時は無視）}
 - PLAY-MUSIC: Spotifyで曲を再生。{"query":"曲名またはアーティスト"}
 - PLAY-YOUTUBE: YouTube動画を検索して埋め込み再生。{"query":"動画検索語", "max_items":5（任意・1-10）}
 - PAUSE-MUSIC: Spotify再生中の曲を一時停止。

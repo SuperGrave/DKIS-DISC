@@ -4,7 +4,6 @@ import csv
 import time
 import json
 import unicodedata
-from datetime import datetime, timedelta
 from xml.etree import ElementTree
 from urllib.parse import quote_plus, quote, urlparse, parse_qs
 from werkzeug.serving import WSGIRequestHandler
@@ -244,16 +243,12 @@ def search_youtube_videos(query: str, max_items: int = 5) -> list[dict]:
     return candidates
 
 # --- Google News RSS（NEWSコマンド用）---
-# time_filter: "today" | "week" | "month" | None（絞りなし）
-def google_news_search(query: str, location: str = None, time_filter: str = None, max_items: int = 20):
+def google_news_search(query: str, max_items: int = 20):
     """
-    Google News RSSでニュースを取得。場所・時間で絞り込み可能。
+    Google News RSSでニュースを取得（queryベース）。
     APIキー不要、検索回数制限なし。
     """
-    # クエリに地域を追加
     q = query.strip()
-    if location:
-        q = f"{q} {location}"
     encoded = quote_plus(q)
     url = f"https://news.google.com/rss/search?q={encoded}&hl=ja&gl=JP&ceid=JP:ja"
     try:
@@ -263,15 +258,6 @@ def google_news_search(query: str, location: str = None, time_filter: str = None
         # RSS 2.0: channel > item
         ns = {"media": "http://search.yahoo.com/mrss/"}
         items = root.findall(".//item") or root.findall("channel/item")
-        cutoff = None
-        if time_filter:
-            now = datetime.utcnow()
-            if time_filter == "today":
-                cutoff = now - timedelta(days=1)
-            elif time_filter == "week":
-                cutoff = now - timedelta(days=7)
-            elif time_filter == "month":
-                cutoff = now - timedelta(days=30)
         output_parts = []
         count = 0
         for item in items:
@@ -285,14 +271,6 @@ def google_news_search(query: str, location: str = None, time_filter: str = None
             link = (link_el.text or "").strip() if link_el is not None else ""
             pub_str = (pub_el.text or "").strip() if pub_el is not None else ""
             source = (source_el.text or "").strip() if source_el is not None else ""
-            if cutoff and pub_str:
-                try:
-                    # RFC 2822形式: "Mon, 10 Feb 2025 12:00:00 GMT"
-                    pub_dt = datetime.strptime(pub_str[:25], "%a, %d %b %Y %H:%M:%S")
-                    if pub_dt.replace(tzinfo=None) < cutoff:
-                        continue
-                except Exception:
-                    pass
             if title or link:
                 line = f"🔹{title}\n{link}"
                 if source:

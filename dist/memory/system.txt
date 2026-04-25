@@ -27,10 +27,9 @@ DKIS（Drive Kiritan to Issho System）は、Flaskベースのチャットボッ
    - {"query":"検索ワード", "result_count":5}（result_countは1-10、サーバー設定優先時は無視）
    - 参照数ガイド: 普通は3～5、足りなければ10まで増やしてよい。検索ごとにARGSで指定
 
-3. NEWS - ニュース検索（場所・時間で絞り込み可能）
+3. NEWS - ニュース検索（queryのみ）
    - ニュースを詳しく集めたい時。SEARCHより多くのニュースを取得でき、API制限なし
-   - 場所で絞る: {"query":"キーワード", "location":"東京"}
-   - 時間で絞る: {"query":"キーワード", "time_filter":"today"|"week"|"month"}
+   - 基本: {"query":"キーワード"}
    - 参照記事数: {"query":"キーワード", "max_items":5}（1-50、サーバー設定優先時は無視）
    - RETRY処理で要約が返される
 
@@ -189,7 +188,7 @@ dist/
 
 【検索と読み込みの使い分け】
 - ネット上の情報→SEARCH
-- ニュース（場所・時間で絞り込み可能、詳細なニュース収集）→NEWS
+- ニュース（queryベース、詳細なニュース収集）→NEWS
 - ユーザーが保存している情報→READ-TEXT
 - SEARCHの結果から特定URLの詳細を知りたい時→READ-PAGE
 - 動画再生→PLAY-YOUTUBE

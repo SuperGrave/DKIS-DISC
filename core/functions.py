@@ -288,18 +288,13 @@ def search_google(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token
     # 次ターン（RETRY）で summary を本返答にする。raw_result はRETRYモーダルで確認用
     return TEXT, dmis_log, summary, result, summary_token_usage
 
-# --- NEWSコマンド（場所・時間で絞れるニュース検索）---
+# --- NEWSコマンド（queryベースのニュース検索）---
 def search_news(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_usage=None):
-    """場所・時間で絞り込めるニュース検索。Google News RSS使用（APIキー不要）"""
+    """queryベースのニュース検索。Google News RSS使用（APIキー不要）"""
     query = args.get("query", "").strip() if isinstance(args, dict) else ""
     if not query:
         dmis_log = "ニュース検索コマンドが実行されたが、検索クエリが指定されず。"
         return TEXT, dmis_log, None, None, None
-
-    location = args.get("location", "").strip() if isinstance(args, dict) else ""
-    time_filter = args.get("time_filter", "").strip().lower() if isinstance(args, dict) else ""
-    if time_filter not in ("today", "week", "month"):
-        time_filter = None
 
     if TEXT and TEXT != "none":
         speak_voicevox(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
@@ -325,7 +320,7 @@ def search_news(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_u
     except Exception:
         pass
 
-    result = google_news_search(query, location=location or None, time_filter=time_filter, max_items=max_items)
+    result = google_news_search(query, max_items=max_items)
     history_text = get_recent_conversation_log(3)
     note = NOTE or args.get("note", "")
 
@@ -338,15 +333,11 @@ def search_news(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_u
 
     if use_raw:
         summary = result  # AI要約をスキップし、生のニュース結果をそのままメインループへ
-        loc_str = f"（{location}）" if location else ""
-        tf_str = f"（{time_filter}）" if time_filter else ""
-        dmis_log = f"『{query}』{loc_str}{tf_str}でニュース検索（生データをメインループへ）。"
+        dmis_log = f"『{query}』でニュース検索（生データをメインループへ）。"
         summary_token_usage = None
     else:
         summary, summary_token_usage = google_news_summary(query, note or "ニュース検索", history_text, result)
-        loc_str = f"（{location}）" if location else ""
-        tf_str = f"（{time_filter}）" if time_filter else ""
-        dmis_log = f"『{query}』{loc_str}{tf_str}でニュース検索。"
+        dmis_log = f"『{query}』でニュース検索。"
     return TEXT, dmis_log, summary, result, summary_token_usage
 
 # 天気関係
