@@ -351,7 +351,7 @@ def apply_tts_enabled_from_settings():
     except Exception:
         enabled = True
     is_muted = not enabled
-    print(f"[TTS] 設定から音声合成状態を適用: enabled={enabled}, is_muted={is_muted}")
+    print(f"[TTS] 設定: enabled={enabled}, is_muted={is_muted}")
 
 # ====== Webhookユーティリティ ======
 def _notify_webhook(payload, timeout=None):
@@ -549,9 +549,9 @@ def reload_voicevox_settings():
         _current_tts_synthesis_timeout = get_setting("timeouts.tts_synthesis", TTS_SYNTHESIS_TIMEOUT)
         # TTS有効状態をsettings.jsonから反映
         apply_tts_enabled_from_settings()
-        print(f"[VOICEVOX] 設定をリロードしました: URL={_current_voicevox_url}, Speaker={_current_speaker_id}, MaxChars={_current_max_tts_chars}")
+        print(f"[VVX] 設定をリロードしました: URL={_current_voicevox_url}, Speaker={_current_speaker_id}, MaxChars={_current_max_tts_chars}")
     except Exception as e:
-        print(f"[VOICEVOX] 設定リロードエラー: {e}")
+        print(f"[VVX] 設定リロードエラー: {e}")
 
 def get_current_voicevox_url():
     """現在のVOICEVOX URLを取得（設定ファイルから）"""

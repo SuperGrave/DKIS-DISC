@@ -61,6 +61,45 @@ def _ensure_main_prompt_has_youtube(prompt: str) -> str:
     return prompt.rstrip() + "\n" + _PLAY_YOUTUBE_PROMPT_LINE + "\n"
 
 
+def _normalize_main_prompt_format(prompt: str) -> str:
+    """メインプロンプトの出力順を [NOTE] → [TEXT] に移行する"""
+    prompt = _ensure_main_prompt_has_youtube(prompt)
+    if not isinstance(prompt, str):
+        return prompt
+
+    old_template = (
+        "[CMD]SPEAK\n"
+        "[ARGS]none\n"
+        "[ARGS-2]{\"retry\": false}\n"
+        "[TEXT](照) マスターの変態っぷりは筋金入りですね...\n"
+        "[NOTE]雑談と判断。発話のみ。"
+    )
+    new_template = (
+        "[CMD]SPEAK\n"
+        "[ARGS]none\n"
+        "[ARGS-2]{\"retry\": false}\n"
+        "[NOTE]雑談と判断。発話のみ。\n"
+        "[TEXT](照) マスターの変態っぷりは筋金入りですね..."
+    )
+    prompt = prompt.replace(old_template, new_template)
+
+    old_bullets = (
+        "・[CMD] 実行関数名を1つだけ\n"
+        "・[ARGS] 引数。不要ならnone\n"
+        "・[ARGS-2] 制御用。retry=trueで多段処理\n"
+        "・[TEXT] 発話。感情タグ付き\n"
+        "・[NOTE] 処理意図やステップを簡潔に記録"
+    )
+    new_bullets = (
+        "・[CMD] 実行関数名を1つだけ\n"
+        "・[ARGS] 引数。不要ならnone\n"
+        "・[ARGS-2] 制御用。retry=trueで多段処理\n"
+        "・[NOTE] 処理意図やステップを簡潔に1行で記録\n"
+        "・[TEXT] 発話。感情タグ付き。必ず最後のタグとして出し、[TEXT]の後に[NOTE]を書かないこと"
+    )
+    return prompt.replace(old_bullets, new_bullets)
+
+
 def _get_default_system_prompts() -> Dict[str, str]:
     """settings_default.json が無い時に使う最小フォールバック用プロンプト"""
     prompts = {
@@ -187,7 +226,7 @@ HTML ページ上で表示されるキャラクター「東北きりたん」と
         "weather_coordinates": "あなたは日本の地名を緯度経度に変換するエキスパートです。\n以下は利用可能な都市リストです（地名=緯度,経度）。\nユーザーが曖昧に言った地名に対して最も妥当な都市を選び、対応する緯度と経度を「緯度,経度」の形式（例：35.6762,139.6503）で答えてください。\n同一都道府県が文中に含まれる場合はその都道府県内から選び、判断が難しい場合は県庁所在地等の代表地点を選んでください。",
         "weather_summary": "あなたは天気情報を要約するAIアシスタントです。\n天気APIの結果を受け取り、ユーザーに分かりやすく説明してください。\n重要な情報（天気、気温、降水確率など）を簡潔に伝えてください。",
     }
-    prompts["main"] = _ensure_main_prompt_has_youtube(prompts["main"])
+    prompts["main"] = _normalize_main_prompt_format(prompts["main"])
     return prompts
 
 
@@ -200,9 +239,9 @@ def get_prompt_setting(prompt_key: str, default: str = "") -> str:
     """現在設定されているシステムプロンプトを取得し、必要ならデフォルトを返す"""
     value = get_setting(f"system_prompts.{prompt_key}", "")
     if isinstance(value, str) and value.strip():
-        return _ensure_main_prompt_has_youtube(value) if prompt_key == "main" else value
+        return _normalize_main_prompt_format(value) if prompt_key == "main" else value
     fallback = default or get_default_prompt(prompt_key)
-    return _ensure_main_prompt_has_youtube(fallback) if prompt_key == "main" else fallback
+    return _normalize_main_prompt_format(fallback) if prompt_key == "main" else fallback
 
 # 設定ファイルのパス
 SETTINGS_FILE = Path("dist/settings.json")
@@ -404,7 +443,7 @@ def _apply_prompt_defaults(settings: Dict[str, Any]):
         if not isinstance(val, str) or not val.strip():
             prompts[key] = default_prompt
 
-    prompts["main"] = _ensure_main_prompt_has_youtube(prompts.get("main", ""))
+    prompts["main"] = _normalize_main_prompt_format(prompts.get("main", ""))
 
 def load_settings() -> Dict[str, Any]:
     """
@@ -421,7 +460,6 @@ def load_settings() -> Dict[str, Any]:
             try:
                 with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
                     _current_settings = json.load(f)
-                print(f"[Settings] 設定ファイルを読み込みました: {SETTINGS_FILE}")
                 # 移行: 旧「検索・ニュース」の use_raw_result をジャンル別に分割
                 if isinstance(_current_settings.get("search"), dict) and _current_settings["search"].get("use_raw_result"):
                     for key in ["news", "text"]:
@@ -431,13 +469,11 @@ def load_settings() -> Dict[str, Any]:
                         if "use_raw_result" not in section:
                             section["use_raw_result"] = True
             except Exception as e:
-                print(f"[Settings] 設定ファイル読み込みエラー: {e}")
+                print(f"[SET] 設定ファイル読み込みエラー: {e}")
                 _current_settings = get_default_settings()
         else:
             # 初回起動時はデフォルト設定を保存
-            print("[Settings] ⚠️ 初回起動時は設定ファイルの作成に時間がかかります（約10-30秒）...")
             _current_settings = get_default_settings()
-            print("[Settings] 📝 設定ファイルを作成中... お待ちください...")
             # ロックを一時的に解放してから save_settings() を呼ぶ（デッドロック回避）
             settings_to_save = _current_settings.copy()
             need_save = True
@@ -445,11 +481,9 @@ def load_settings() -> Dict[str, Any]:
     # ロックの外で save_settings() を呼ぶ（デッドロック回避）
     if need_save:
         save_settings(settings_to_save)
-        print(f"[Settings] デフォルト設定を作成しました: {SETTINGS_FILE}")
         # save_settings() 内で既に _current_settings が更新されているはず
     
     # 最終的な結果を返す（ロックは不要、読み取りのみ）
-    print("[Settings] ⏳ 設定データを準備中...")
     with _settings_lock:
         defaults = get_default_settings()
         before = json.dumps(_current_settings, ensure_ascii=False, sort_keys=True) if _current_settings else None
@@ -480,15 +514,13 @@ def save_settings(settings: Dict[str, Any]) -> bool:
             json.dump(settings, f, ensure_ascii=False, indent=2)
         
         # ファイル書き込み成功後にメモリキャッシュを更新
-        print("[Settings] ⏳ 大きな設定データを処理中です。しばらくお待ちください...")
         with _settings_lock:
             _current_settings = settings.copy()
             _mark_settings_file_synced()
         
-        print(f"[Settings] 設定を保存しました: {SETTINGS_FILE}")
         return True
     except Exception as e:
-        print(f"[Settings] 設定保存エラー: {e}")
+        print(f"[SET] 設定保存エラー: {e}")
         import traceback
         traceback.print_exc()
         return False

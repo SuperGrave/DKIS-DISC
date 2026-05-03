@@ -232,7 +232,10 @@ def parse_ai_response(text: str) -> dict:
         "NOTE": ""
     }
 
-    lines = text.splitlines()
+    # AIが本文末尾に「...。[NOTE]...」のように同じ行でタグを続けても、
+    # タグ境界として扱えるように改行を補う。
+    normalized_text = re.sub(r"([^\n])\[(CMD|COMMAND|ARGS|ARGS-2|TEXT|NOTE)\]", r"\1\n[\2]", text)
+    lines = normalized_text.splitlines()
     i = 0
     while i < len(lines):
         m = pattern.match(lines[i].strip())

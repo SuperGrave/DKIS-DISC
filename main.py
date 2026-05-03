@@ -3,6 +3,7 @@ from flask_cors import CORS
 from werkzeug.serving import WSGIRequestHandler
 from functools import wraps
 import sys
+import time
 
 
 def _force_utf8_console():
@@ -17,6 +18,7 @@ def _force_utf8_console():
 
 
 _force_utf8_console()
+BOOT_START_TIME = time.perf_counter()
 
 # ==== 設定は config.py に集約 ====
 from config import (
@@ -72,25 +74,38 @@ from collections import deque  # ← 追加
 
 # 予報地点テーブルのウォームアップ
 count = warm_primary_area()
-print(f"[WEATHER] primary_area.xml をロードしました（{count} 件）")
+print(f"[WTR] primary_area.xml をロードしました（{count} 件）")
 
 # 緯度経度テーブルのウォームアップ
 try:
     location_count = warm_location_table()
-    print(f"[WEATHER] locations.csv をロードしました（{location_count} 件）")
+    print(f"[WTR] locations.csv をロードしました（{location_count} 件）")
 except Exception as e:
-    print(f"[WEATHER] ⚠️ locations.csv のロードに失敗しました（スキップ）: {e}")
+    print(f"[WTR] ⚠️ locations.csv のロードに失敗しました（スキップ）: {e}")
 
 # 設定マネージャーを初期化（settings.jsonを読み込む）
-print("[SETTINGS] ⏳ 設定を読み込んでいます...")
 try:
     load_settings()
+    settings_path = "dist\\settings.json"
+    settings_size_kb = 0.0
+    try:
+        from pathlib import Path
+        settings_size_kb = Path(settings_path).stat().st_size / 1024
+    except Exception:
+        settings_size_kb = 0.0
+    print(f"[SET] {settings_path} をロードしました ({settings_size_kb:.1f} KB)")
     # 動的設定を各モジュールに反映
     reload_chat_loop_settings()
     reload_voicevox_settings()
     print("[SETTINGS] ✅ 設定ファイルを読み込みました")
 except Exception as e:
-    print(f"[SETTINGS] ⚠️ 設定マネージャー初期化エラー（デフォルト設定を使用）: {e}")
+    print(f"[SET] ⚠️ dist\\settings.json のロードに失敗しました（デフォルト設定を使用）: {e}")
+    print("[CLP] ⚠️ settings.json の読み込みに失敗したためデフォルト設定を適用します")
+    try:
+        reload_chat_loop_settings()
+        reload_voicevox_settings()
+    except Exception as reload_error:
+        print(f"[CLP] ⚠️ デフォルト設定の反映にも失敗しました: {reload_error}")
     import traceback
     traceback.print_exc()
 
@@ -128,7 +143,6 @@ def get_next_global_retry_id():
 
 # ===== 統計情報カウンター =====
 import datetime
-import time
 
 server_start_time = datetime.datetime.now()  # サーバー起動時刻
 server_start_timestamp = time.time()  # サーバー起動時のタイムスタンプ
@@ -633,8 +647,22 @@ if __name__ == "__main__":
     except Exception:
         server_port = SERVER_PORT
 
-    print(f"[DKIS] サーバーを起動します: {server_host}:{server_port}")
-    print(f"[DKIS] ポート再利用設定: 有効（再起動時の TIME_WAIT 対策）")
+    def _log_server_ready_elapsed(host: str, port: int):
+        """サーバー起動完了までの経過時間を計測して出力する。"""
+        import socket
+        deadline = time.perf_counter() + 15.0
+        while time.perf_counter() < deadline:
+            try:
+                with socket.create_connection((host, port), timeout=0.2):
+                    elapsed = time.perf_counter() - BOOT_START_TIME
+                    print(f"[DKIS]  サーバーを起動します:起動時間{elapsed:.2f}s")
+                    return
+            except Exception:
+                time.sleep(0.05)
+        elapsed = time.perf_counter() - BOOT_START_TIME
+        print(f"[DKIS]  サーバーを起動します:起動時間{elapsed:.2f}s（検知タイムアウト）")
+
+    Thread(target=_log_server_ready_elapsed, args=(server_host, server_port), daemon=True).start()
     
     try:
         app.run(host=server_host, port=server_port, threaded=True)

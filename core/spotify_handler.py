@@ -11,6 +11,7 @@ from config import (
 from core.utils import print_color, CYAN, RED_BRIGHT
 from core.voicevox_handler import speak_voicevox  # 現状未使用でも互換維持
 import threading
+import time
 
 # エラー送信関数（main.pyから注入される）
 _send_error_event = None
@@ -115,43 +116,52 @@ def get_current_track_info() -> dict:
     """現在再生中の曲の詳細情報を取得"""
     if sp is None:
         return None
-    try:
-        playback = sp.current_playback()
-        if playback and playback.get("item"):
-            track = playback["item"]
-            
-            # タイトル
-            title = track.get("name", "不明")
-            
-            # アーティスト（複数の場合はカンマ区切り）
-            artists = track.get("artists", [])
-            artist = ", ".join([a.get("name", "") for a in artists]) if artists else "不明"
-            
-            # アルバム名
-            album = track.get("album", {}).get("name", "不明")
-            
-            # Spotify URL
-            url = track.get("external_urls", {}).get("spotify", "")
-            
-            # アルバムアート
-            album_images = track.get("album", {}).get("images", [])
-            album_art = album_images[0].get("url") if album_images else None
-            
-            # 再生状態
-            is_playing = playback.get("is_playing", False)
-            
-            return {
-                "title": title,
-                "artist": artist,
-                "album": album,
-                "url": url,
-                "album_art": album_art,
-                "is_playing": is_playing
-            }
-        return None
-    except Exception as e:
-        _send_spotify_error("spotify_api", "Spotifyの曲情報取得に失敗しました", str(e))
-        return None
+    max_attempts = 3
+    retry_wait_sec = 5
+    last_error = None
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            playback = sp.current_playback()
+            if playback and playback.get("item"):
+                track = playback["item"]
+
+                # タイトル
+                title = track.get("name", "不明")
+
+                # アーティスト（複数の場合はカンマ区切り）
+                artists = track.get("artists", [])
+                artist = ", ".join([a.get("name", "") for a in artists]) if artists else "不明"
+
+                # アルバム名
+                album = track.get("album", {}).get("name", "不明")
+
+                # Spotify URL
+                url = track.get("external_urls", {}).get("spotify", "")
+
+                # アルバムアート
+                album_images = track.get("album", {}).get("images", [])
+                album_art = album_images[0].get("url") if album_images else None
+
+                # 再生状態
+                is_playing = playback.get("is_playing", False)
+
+                return {
+                    "title": title,
+                    "artist": artist,
+                    "album": album,
+                    "url": url,
+                    "album_art": album_art,
+                    "is_playing": is_playing
+                }
+            return None
+        except Exception as e:
+            last_error = e
+            if attempt < max_attempts:
+                time.sleep(retry_wait_sec)
+
+    _send_spotify_error("spotify_api", "Spotifyの曲情報取得に失敗しました", str(last_error))
+    return None
 
 
 # 無音トラックを再生（KeepAliveで使用）

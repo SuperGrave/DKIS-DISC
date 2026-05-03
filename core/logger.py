@@ -78,9 +78,9 @@ def _fmt_ai_raw_block(parsed: Dict[str, Any]) -> str:
     lines.append(f"[CMD]{cmd}")
     lines.append(f"[ARGS]{args_str}")
     lines.append(f"[ARGS-2]{a2_str}")
-    lines.append(f"[TEXT]{text_str}")
     if note:
         lines.append(f"[NOTE]{note}")
+    lines.append(f"[TEXT]{text_str}")
     return "\n".join(lines)
 
 

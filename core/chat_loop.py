@@ -57,7 +57,7 @@ def reload_chat_loop_settings():
         if history_limit is None:
             history_limit = 3
     except Exception as e:
-        print(f"[chat_loop] 設定取得に失敗: {e}")
+        print(f"[CLP] ⚠️ 設定の取得に失敗したためデフォルト値を使用します: {e}")
         prompt = get_prompt_setting("chat_only", get_default_prompt("chat_only"))
         model = GPT_MODEL_CHAT_ONLY
         history_limit = 3
@@ -77,9 +77,9 @@ def reload_chat_loop_settings():
         pass
     if reset_history:
         _chat_only_history = []
-        print(f"[chat_loop] 設定リロード: model={_chat_only_model}, history_limit={_chat_only_history_limit}（履歴リセット）")
+        print(f"[CLP] 設定: model={_chat_only_model}, history_limit={_chat_only_history_limit}")
     else:
-        print(f"[chat_loop] 設定リロード: model={_chat_only_model}, history_limit={_chat_only_history_limit}（履歴保持）")
+        print(f"[CLP] 設定: model={_chat_only_model}, history_limit={_chat_only_history_limit}")
 
 
 def _trim_history():

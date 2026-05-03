@@ -45,14 +45,14 @@ def load_users() -> Dict[str, Any]:
             try:
                 with open(USERS_FILE, 'r', encoding='utf-8') as f:
                     _users_data = json.load(f)
-                print(f"[Auth] ユーザーデータを読み込みました: {len(_users_data.get('users', {}))} ユーザー")
+                print(f"[ATH] ユーザーデータを読み込みました: {len(_users_data.get('users', {}))} ユーザー")
             except Exception as e:
-                print(f"[Auth] ユーザーデータ読み込みエラー: {e}")
+                print(f"[ATH] ユーザーデータ読み込みエラー: {e}")
                 _users_data = _create_initial_data()
                 need_save = True
         else:
             # 初回起動時は初期データを作成
-            print("[Auth] ユーザーデータファイルが存在しません。初期データを作成します。")
+            print("[ATH] ユーザーデータファイルが存在しません。初期データを作成します。")
             _users_data = _create_initial_data()
             need_save = True
     
@@ -437,8 +437,5 @@ def update_user_role(user_id: str, new_role: str, operator_user_id: str, passwor
         return False, "権限の保存に失敗しました"
 
 # 起動時にユーザーデータを読み込む
-print("[Auth] 認証管理システムを初期化しています...")
 load_users()
-print("[Auth] 認証管理システムの初期化が完了しました")
-print(f"[Auth] 📂 ユーザーデータファイル: {USERS_FILE.absolute()}")
-print(f"[Auth] 🔒 認証方式: users.json は平文保存 / 通信はSHA-256で照合（暫定運用）")
+print(f"[ATH] ユーザーデータファイル: {USERS_FILE.absolute()}")
