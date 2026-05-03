@@ -34,6 +34,7 @@ from config import (
 
 from core.gpt_handler import (
     handle_user_input_v2,
+    reload_gpt_settings,
     set_global_retry_id_getter,
     set_send_event_func as set_gpt_send_event,
     get_next_conversation_retry_id,
@@ -83,9 +84,42 @@ try:
 except Exception as e:
     print(f"[WTR] ⚠️ locations.csv のロードに失敗しました（スキップ）: {e}")
 
+
+def print_frontend_initial_server_settings(settings):
+    """フロントエンドが起動時に初回適用するサーバー設定の要点を表示する。"""
+    ai_models = settings.get("ai_models") or {}
+    control = settings.get("control") or {}
+    search = settings.get("search") or {}
+    news = settings.get("news") or {}
+    webpage = settings.get("webpage") or {}
+    text = settings.get("text") or {}
+    tts = settings.get("tts") or {}
+
+    print(
+        "[SETTINGS] 起動時フロント適用サーバー設定: "
+        f"ai_loop_mode={control.get('ai_loop_mode')}, "
+        f"main.model={ai_models.get('main')}, "
+        f"main.history_limit={control.get('max_history')}, "
+        f"chat_only.model={ai_models.get('chat_only')}, "
+        f"chat_only.history_limit={control.get('chat_only_max_history')}"
+    )
+    print(
+        "[SETTINGS] 起動時フロント適用サーバー設定: "
+        f"search.model={ai_models.get('search_summary')}, "
+        f"search.result_count={search.get('result_count')}, "
+        f"search.use_raw_result={search.get('use_raw_result')}, "
+        f"news.model={ai_models.get('news_summary')}, "
+        f"news.max_items={news.get('max_items')}, "
+        f"news.use_raw_result={news.get('use_raw_result')}, "
+        f"webpage.use_raw_result={webpage.get('use_raw_result')}, "
+        f"text.use_raw_result={text.get('use_raw_result')}, "
+        f"tts.enabled={tts.get('enabled')}"
+    )
+
+
 # 設定マネージャーを初期化（settings.jsonを読み込む）
 try:
-    load_settings()
+    loaded_settings = load_settings()
     settings_path = "dist\\settings.json"
     settings_size_kb = 0.0
     try:
@@ -95,6 +129,8 @@ try:
         settings_size_kb = 0.0
     print(f"[SET] {settings_path} をロードしました ({settings_size_kb:.1f} KB)")
     # 動的設定を各モジュールに反映
+    print_frontend_initial_server_settings(loaded_settings)
+    reload_gpt_settings()
     reload_chat_loop_settings()
     reload_voicevox_settings()
     print("[SETTINGS] ✅ 設定ファイルを読み込みました")
