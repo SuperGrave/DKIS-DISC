@@ -252,6 +252,7 @@ def create_api_blueprint(deps: dict) -> Blueprint:
         send_event("tts_enabled_changed", {"enabled": enabled})
         return jsonify({"ok": True, "enabled": enabled})
 
+    @bp.route("/api/voicevox/user_dict", methods=["GET"], endpoint="api_voicevox_user_dict_list")
     @bp.route("/voicevox/user_dict", methods=["GET"], endpoint="voicevox_user_dict_list")
     @role_required("operator")
     def voicevox_user_dict_list_route():
@@ -260,6 +261,7 @@ def create_api_blueprint(deps: dict) -> Blueprint:
         words = list_voicevox_dict_words()
         return jsonify({"ok": True, "words": words})
 
+    @bp.route("/api/voicevox/user_dict", methods=["POST"], endpoint="api_voicevox_user_dict_add")
     @bp.route("/voicevox/user_dict", methods=["POST"], endpoint="voicevox_user_dict_add")
     @role_required("operator")
     def voicevox_user_dict_add_route():
@@ -282,6 +284,7 @@ def create_api_blueprint(deps: dict) -> Blueprint:
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
 
+    @bp.route("/api/voicevox/user_dict/<word_uuid>", methods=["DELETE"], endpoint="api_voicevox_user_dict_delete")
     @bp.route("/voicevox/user_dict/<word_uuid>", methods=["DELETE"], endpoint="voicevox_user_dict_delete")
     @role_required("operator")
     def voicevox_user_dict_delete_route(word_uuid):
