@@ -5,7 +5,7 @@ from config import (
 )
 from core.settings_manager import get_default_prompt, get_prompt_setting
 from core.context_provider import set_last_user_input, set_last_proc_result
-from core.voicevox_handler import speak_voicevox
+from core.response_handler import speak_response
 from core.logger import append_chat_only_log
 from core.input_builder import build_input_segments
 
@@ -169,7 +169,7 @@ def handle_chat_only_input(user_text: str, user_id: str = None, client_id: str =
     _trim_history()
 
     processing_time = time.time() - start_time
-    speak_voicevox(reply, ai_raw=reply, processing_time=processing_time, token_usage=token_usage)
+    speak_response(reply, ai_raw=reply, processing_time=processing_time, token_usage=token_usage)
     append_chat_only_log(formatted_input, reply, ai_raw=reply, ts_str=input_payload.get("timestamp"))
     set_last_proc_result("省エネ会話モードで通常応答。")
 

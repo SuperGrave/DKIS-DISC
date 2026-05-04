@@ -4,6 +4,7 @@ from werkzeug.serving import WSGIRequestHandler
 from functools import wraps
 import sys
 import time
+import os
 
 
 def _force_utf8_console():
@@ -22,14 +23,8 @@ BOOT_START_TIME = time.perf_counter()
 
 # ==== 設定は config.py に集約 ====
 from config import (
-    VOICEVOX_URL, SPEAKER_ID,
-    SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REDIRECT_URI,
-    # ↓ 追加分
-    SPOTIFY_SCOPE,
     SSE_RECENT_KEYS_MAXLEN, MAX_RETRIES,
     MUNICD_CSV_PATH, FRONT_INDEX_PATH,
-    SERVER_HOST, SERVER_PORT,
-    TTS_CACHE_DIR,
 )
 
 from core.gpt_handler import (
@@ -45,27 +40,24 @@ from core.chat_loop import (
     set_increment_stat_func as set_chat_loop_increment_stat,
     set_error_sender as set_chat_loop_error_sender,
 )
-from core.voicevox_handler import speak_voicevox
-from core.voicevox_handler import enqueue_utterance
-from core.voicevox_handler import reload_voicevox_settings
 from core.utils import CustomRequestHandler, YELLOW_BRIGHT, RESET
-from core.spotify_handler import set_spotify_client, start_spotify_keepalive_loop, set_error_sender
-from core.voicevox_handler import set_error_sender as set_voicevox_error_sender
 from core.gpt_handler import set_error_sender as set_gpt_error_sender
+from core.response_handler import (
+    enqueue_utterance,
+    set_error_sender as set_response_error_sender,
+    set_increment_stat_func as set_response_increment_stat,
+    set_send_event_func as set_response_send_event,
+)
 from core.settings_manager import load_settings, get_setting, get_current_settings, update_settings
-from spotipy.oauth2 import SpotifyOAuth
 from core.webhook_manager import set_webhook_url
 from threading import Lock, Thread
 from core.context_provider import set_current_location, get_current_location
 from core.utils import load_muniCd_dict, latlon_to_address
 from core.weather import warm_primary_area, warm_location_table
-from core.youtube_state import get_youtube_state, set_status_notifier as set_youtube_status_notifier
 from routes.auth import create_auth_blueprint
 from routes.settings import create_settings_blueprint
 from routes.sse import create_sse_blueprint
-from routes.files import create_files_blueprint
 from routes.api import create_api_blueprint
-import spotipy
 import queue
 import json
 import logging
@@ -93,7 +85,6 @@ def print_frontend_initial_server_settings(settings):
     news = settings.get("news") or {}
     webpage = settings.get("webpage") or {}
     text = settings.get("text") or {}
-    tts = settings.get("tts") or {}
 
     print(
         "[SETTINGS] 起動時フロント適用サーバー設定: "
@@ -112,8 +103,7 @@ def print_frontend_initial_server_settings(settings):
         f"news.max_items={news.get('max_items')}, "
         f"news.use_raw_result={news.get('use_raw_result')}, "
         f"webpage.use_raw_result={webpage.get('use_raw_result')}, "
-        f"text.use_raw_result={text.get('use_raw_result')}, "
-        f"tts.enabled={tts.get('enabled')}"
+        f"text.use_raw_result={text.get('use_raw_result')}"
     )
 
 
@@ -132,41 +122,16 @@ try:
     print_frontend_initial_server_settings(loaded_settings)
     reload_gpt_settings()
     reload_chat_loop_settings()
-    reload_voicevox_settings()
     print("[SETTINGS] ✅ 設定ファイルを読み込みました")
 except Exception as e:
     print(f"[SET] ⚠️ dist\\settings.json のロードに失敗しました（デフォルト設定を使用）: {e}")
     print("[CLP] ⚠️ settings.json の読み込みに失敗したためデフォルト設定を適用します")
     try:
         reload_chat_loop_settings()
-        reload_voicevox_settings()
     except Exception as reload_error:
         print(f"[CLP] ⚠️ デフォルト設定の反映にも失敗しました: {reload_error}")
     import traceback
     traceback.print_exc()
-
-# ===== Spotify 認証（設定でON/OFF） =====
-sp = None
-spotify_auto_auth_enabled = bool(get_setting("spotify.auto_auth", True))
-spotify_keepalive_enabled = bool(get_setting("spotify.keepalive_enabled", True))
-
-if spotify_auto_auth_enabled:
-    try:
-        sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
-            client_id=SPOTIFY_CLIENT_ID,
-            client_secret=SPOTIFY_CLIENT_SECRET,
-            redirect_uri=SPOTIFY_REDIRECT_URI,
-            scope=SPOTIFY_SCOPE,
-        ))
-        print("[SPOTIFY] 認証完了")
-    except Exception as e:
-        print(f"[SPOTIFY] 認証スキップ/失敗: {e}")
-
-# ===== Spotifyクライアントをcoreへ渡す & KeepAlive起動（設定で制御） =====
-if sp is not None:
-    set_spotify_client(sp)
-    if spotify_keepalive_enabled:
-        start_spotify_keepalive_loop()
 
 # ===== グローバルRETRY ID取得関数を定義（後でgpt_handlerに注入） =====
 _global_retry_counter = 0  # サーバー起動からのRETRY用インプット総数
@@ -224,10 +189,9 @@ set_global_retry_id_getter(get_next_global_retry_id)
 
 # 統計カウンター関数を各モジュールに注入
 from core.gpt_handler import set_increment_stat_func as set_gpt_increment_stat
-from core.voicevox_handler import set_increment_stat_func as set_voicevox_increment_stat
 from core.functions import set_increment_stat_func as set_functions_increment_stat
 set_gpt_increment_stat(increment_stat)
-set_voicevox_increment_stat(increment_stat)
+set_response_increment_stat(increment_stat)
 set_functions_increment_stat(increment_stat)
 set_chat_loop_increment_stat(increment_stat)
 print("[STAT] 統計カウンター関数を注入しました")
@@ -307,11 +271,6 @@ def _mk_key(ev, uid, reason, data=None):
         key = f"{ev}:{global_retry_id}:{conversation_retry_id}:{retry_index}"
         return key
     
-    # synth_startとsynth_doneイベントの場合はsegment_indexも含める
-    if ev in ("synth_start", "synth_done") and data:
-        segment_index = data.get("segment_index", 0)
-        return f"{ev}:{uid}:{segment_index}:{reason or '-'}"
-    
     # tts_enabled_changedイベントの場合はenabled値を含める（重複チェック回避）
     if ev == "tts_enabled_changed" and data:
         enabled = data.get("enabled", False)
@@ -362,7 +321,7 @@ def send_error_event(error_type: str, summary: str, details: str):
     エラーイベントを全クライアントに送信
     
     Args:
-        error_type: エラーの種類（例: "spotify_auth", "api_key_expired", "parse_error"）
+        error_type: エラーの種類（例: "api_key_expired", "parse_error"）
         summary: エラーの要約文（例: "SpotifyのAPIが認証できません"）
         details: エラーの詳細文（例: "Access token has expired"）
     """
@@ -382,11 +341,10 @@ def send_error_event(error_type: str, summary: str, details: str):
 
 # gpt_handlerにSSE送信関数を注入（webhook未設定時のretry_inputフォールバック用）
 set_gpt_send_event(send_event)
+set_response_send_event(send_event)
 
 # エラー送信関数を各ハンドラーに注入（関数定義後に実行）
-if sp is not None:
-    set_error_sender(send_error_event)
-set_voicevox_error_sender(send_error_event)
+set_response_error_sender(send_error_event)
 set_gpt_error_sender(send_error_event)
 set_chat_loop_error_sender(send_error_event)
 
@@ -478,9 +436,6 @@ def send_clients_list():
 
 def _build_system_status_payload(force_update=False):
     """システム状態のペイロードを構築"""
-    from core.spotify_handler import get_keepalive_status, update_keepalive_status_now, get_current_track_info
-    from core.voicevox_handler import check_voicevox_status
-
     prune_stale_clients()
     with event_queues_lock:
         clients = []
@@ -498,27 +453,11 @@ def _build_system_status_payload(force_update=False):
             }
             clients.append(client_data)
     
-    # Spotify状態を取得
-    spotify_keepalive_enabled = bool(get_setting("spotify.keepalive_enabled", True))
-    spotify_info = {
-        "enabled": spotify_keepalive_enabled,
-        "keepalive": (update_keepalive_status_now() if force_update else get_keepalive_status()) if spotify_keepalive_enabled else None,
-        "current_track": get_current_track_info() if spotify_keepalive_enabled else None
-    }
-    
-    # VOICEVOX状態を取得
-    voicevox_info = check_voicevox_status()
-    
-    # TTS有効/無効状態を取得（settings.json の tts.enabled を参照）
-    from core.settings_manager import get_setting as _get_setting_for_status
-    tts_enabled = bool(_get_setting_for_status("tts.enabled", True))
-    
     # 統計情報を取得
     stats = get_statistics()
 
     ai_loop_mode = get_setting("control.ai_loop_mode", "main")
     chat_only_history_limit = get_setting("control.chat_only_max_history", 3)
-    youtube_info = get_youtube_state()
     
     return {
         "type": "system_status",
@@ -526,10 +465,7 @@ def _build_system_status_payload(force_update=False):
             "list": clients,
             "total": len(clients)
         },
-        "spotify": spotify_info,
-        "youtube": youtube_info,
-        "voicevox": voicevox_info,
-        "tts_enabled": tts_enabled,
+        "text_only": True,
         "statistics": stats,
         "ai_loop": {
             "mode": ai_loop_mode,
@@ -548,9 +484,6 @@ def send_system_status():
                 q.put(event_data, block=False)
             except queue.Full:
                 pass
-
-
-set_youtube_status_notifier(send_system_status)
 
 def broadcast_clients_periodically():
     """定期的にクライアントリストとシステム状態を配信"""
@@ -627,18 +560,12 @@ app.register_blueprint(create_sse_blueprint({
     "event_queues_lock": event_queues_lock,
 }))
 
-app.register_blueprint(create_files_blueprint({
-    "app": app,
-    "role_required": role_required,
-}))
-
 app.register_blueprint(create_api_blueprint({
     "app": app,
     "login_required": login_required,
     "role_required": role_required,
     "FRONT_INDEX_PATH": FRONT_INDEX_PATH,
     "MAX_RETRIES": MAX_RETRIES,
-    "TTS_CACHE_DIR": TTS_CACHE_DIR,
     "YELLOW_BRIGHT": YELLOW_BRIGHT,
     "RESET": RESET,
     "get_setting": get_setting,
@@ -676,12 +603,9 @@ if __name__ == "__main__":
     
     werkzeug.serving.ThreadedWSGIServer.server_bind = patched_server_bind
     
-    # サーバーを起動
-    server_host = get_setting("server.host", SERVER_HOST)
-    try:
-        server_port = int(get_setting("server.port", SERVER_PORT))
-    except Exception:
-        server_port = SERVER_PORT
+    # クラウド環境では PORT が注入される前提で起動
+    server_host = "0.0.0.0"
+    server_port = int(os.environ.get("PORT", 5000))
 
     def _log_server_ready_elapsed(host: str, port: int):
         """サーバー起動完了までの経過時間を計測して出力する。"""

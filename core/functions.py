@@ -1,16 +1,12 @@
 from core.logger import save_log_to_file
-from core.voicevox_handler import speak_voicevox  # ← notify_reply は使わない
+from core.response_handler import speak_response
 from core.utils import (
     google_search,
     google_news_search,
     resolve_google_news_url,
-    search_youtube_videos,
-    build_youtube_embed_url,
     normalize_location_text,
 )
 from core.scraper import scrape_webpage
-from core.spotify_handler import search_and_play, pause_playback, resume_playback
-from core.youtube_state import set_youtube_state, clear_youtube_state, set_pending_youtube_selection
 from core.logger import get_recent_conversation_log  # 履歴取得用
 from core.context_provider import get_last_user_input  # ユーザー入力取得用
 from openai import OpenAI
@@ -18,7 +14,6 @@ from config import (
     OPENAI_API_KEY,
     GPT_MODEL_SEARCH_SUMMARY,  # 検索要約用モデル
     GPT_MODEL_NEWS_SUMMARY,    # ニュース要約用モデル
-    GPT_MODEL_TEXT_SUMMARY,    # テキスト要約用モデル
     GPT_MODEL_WEBPAGE_SUMMARY, # Webページ要約用モデル
     WEATHER_API_URL,           # 天気API URL
     WEATHER_API_TIMEOUT        # 天気API タイムアウト
@@ -90,7 +85,7 @@ def chat_response(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token
     user_text = args.get("text", "") if isinstance(args, dict) else ""
     # ここでask_gptして多重出力エラーになったこと、ありまーす（なので喋るだけ）
     if TEXT and TEXT != "none":
-        speak_voicevox(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
+        speak_response(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
     return TEXT, "通常の会話応答を実行。"
 
 # ログ保存
@@ -98,58 +93,9 @@ def save_log(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_usag
     save_log_to_file()
     # AIが生成したTEXTをそのまま使用
     if TEXT and TEXT != "none":
-        speak_voicevox(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
+        speak_response(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
     return TEXT, "テキストファイルとして会話ログを保存。"
 
-def list_files_command(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_usage=None):
-    """ファイル一覧を取得するコマンド"""
-    from core.file_manager import list_memory_files
-    
-    files = list_memory_files()
-    file_list_str = json.dumps(files, ensure_ascii=False, indent=2)
-    dmis_log = "memoryフォルダ内のファイル一覧を取得。"
-    summary = f"ファイル一覧:\n{file_list_str}"
-    
-    # ユーザーへの応答とファイル一覧を返す
-    if TEXT and TEXT != "none":
-        speak_voicevox(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
-        
-    return TEXT, dmis_log, summary, files
-
-def write_text_command(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_usage=None):
-    """テキストファイルを書き込むコマンド"""
-    from core.file_manager import write_text_file
-    
-    filename = args.get("filename")
-    content = args.get("content")
-    description = args.get("description")
-    
-    if not filename or not content:
-        return TEXT, "エラー: filename と content は必須です。"
-        
-    success, msg = write_text_file(filename, content, description)
-    
-    if TEXT and TEXT != "none":
-        speak_voicevox(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
-        
-    return TEXT, msg
-
-def append_text_command(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_usage=None):
-    """テキストファイルに追記するコマンド"""
-    from core.file_manager import append_text_file
-    
-    filename = args.get("filename")
-    content = args.get("content")
-    
-    if not filename or not content:
-        return TEXT, "エラー: filename と content は必須です。"
-        
-    success, msg = append_text_file(filename, content)
-    
-    if TEXT and TEXT != "none":
-        speak_voicevox(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
-        
-    return TEXT, msg
 
 
 def google_search_summary(query, note, history_text, search_result):
@@ -246,7 +192,7 @@ def search_google(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token
 
     # 進捗は"発話だけ"で先行。notify_reply は使わない（utter_id整合のため）
     if TEXT and TEXT != "none":
-        speak_voicevox(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
+        speak_response(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
 
     # 参照数: サーバー優先時は設定値、そうでなければARGSのresult_countを優先
     num = None
@@ -297,7 +243,7 @@ def search_news(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_u
         return TEXT, dmis_log, None, None, None
 
     if TEXT and TEXT != "none":
-        speak_voicevox(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
+        speak_response(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
 
     # 参照記事数: サーバー優先時は設定値のみ、そうでなければARGSのmax_itemsを優先
     max_items = 10
@@ -500,7 +446,7 @@ def get_weather(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_u
     # 進捗アナウンスを"先に"出す（音声のみ。/reply直叩きはしない）
     if TEXT and TEXT != "none":
         try:
-            speak_voicevox(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)     # 音声を先行再生（utter_id付きreplyは内部で飛ぶ）
+            speak_response(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)     # 音声を先行再生（utter_id付きreplyは内部で飛ぶ）
         except Exception:
             pass
 
@@ -685,323 +631,8 @@ def _normalize_json_text(text: str) -> str:
     return text.strip()
 
 
-def _get_youtube_search_options(args: dict | None) -> tuple[str, int]:
-    try:
-        from core.settings_manager import get_setting
-
-        selection_mode = str(get_setting("youtube.selection_mode", "ai_auto") or "ai_auto").strip()
-        if selection_mode not in {"ai_auto", "top_auto", "user_select"}:
-            selection_mode = "ai_auto"
-        configured_max = max(1, min(10, int(get_setting("youtube.max_items", 5) or 5)))
-        server_priority = bool(get_setting("youtube.server_priority", False))
-    except Exception:
-        selection_mode = "ai_auto"
-        configured_max = 5
-        server_priority = False
-
-    requested_max = configured_max
-    if isinstance(args, dict):
-        try:
-            requested_max = max(1, min(10, int(args.get("max_items", configured_max))))
-        except (TypeError, ValueError):
-            requested_max = configured_max
-
-    return selection_mode, configured_max if server_priority else requested_max
-
-
-def _build_youtube_retry_content(query: str, mode: str, status_text: str) -> str:
-    return "\n".join([
-        f"RI：YouTube検索: {query}",
-        f"選定モード: {mode}",
-        f"結果: {status_text}",
-        f"LP：YouTube処理メモ: {status_text}",
-    ])
-
-
-def _build_youtube_log_payload(query: str, mode: str, status: str, candidates: list[dict], selected: dict | None = None, reason: str = "", canceled: bool = False) -> dict:
-    return {
-        "__emit_retry_log__": True,
-        "__retry_content__": _build_youtube_retry_content(query, mode, status),
-        "query": query,
-        "mode": mode,
-        "status": status,
-        "canceled": bool(canceled),
-        "reason": reason,
-        "selected": selected,
-        "candidates": candidates,
-    }
-
-
-def _set_youtube_player_state(query: str, selection_mode: str, selected: dict, *, reason: str = "", selection_source: str = "", autoplay: bool = True, muted: bool = False):
-    video_id = selected["video_id"]
-    youtube_payload = {
-        "visible": True,
-        "video_id": video_id,
-        "title": selected["title"],
-        "url": selected["url"],
-        "thumbnail": selected.get("thumbnail", ""),
-        "embed_url": build_youtube_embed_url(video_id, autoplay=autoplay, mute=muted),
-        "manual_embed_url": build_youtube_embed_url(video_id, autoplay=True, mute=False),
-        "autoplay": autoplay,
-        "muted": muted,
-        "needs_user_action": False,
-        "reason": reason or selected.get("selection_reason", ""),
-        "source_query": query,
-        "mode": "player",
-        "selection_mode": selection_mode,
-        "selection_source": selection_source,
-        "pending_selection": False,
-        "selected_index": None,
-        "candidates": [dict(selected)],
-    }
-    set_youtube_state(youtube_payload)
-    return youtube_payload
-
-
-def select_youtube_video(query: str, candidates: list[dict], note: str = ""):
-    """YouTube候補から最も適切な1件をAIに選ばせる。"""
-    if not candidates:
-        return None, None, "候補がありません。"
-    if len(candidates) == 1:
-        selected = dict(candidates[0])
-        selected["selection_reason"] = "候補が1件のみのため、そのまま採用。"
-        return selected, None, ""
-
-    formatted_candidates = []
-    for idx, candidate in enumerate(candidates, start=1):
-        formatted_candidates.append(
-            f"{idx}. タイトル: {candidate.get('title', '')}\n"
-            f"   URL: {candidate.get('url', '')}\n"
-            f"   説明: {candidate.get('snippet', '')}"
-        )
-
-    system_prompt = (
-        "あなたはYouTube動画候補の選定AIです。\n"
-        "ユーザーの意図に最も合う動画を1件だけ選んでください。\n"
-        "転載・切り抜き・無関係な再アップロードより、公式・原曲・代表的な動画を優先してください。\n"
-        "どの候補も意図に合わない場合は selected_index を 0 にしてください。\n"
-        "回答はJSONのみで返し、余計な説明は書かないでください。\n"
-        '形式: {"selected_index": 1, "reason": "選定理由"}'
-    )
-    note_prompt = f"【検索の目的】\n{note}\n" if note else ""
-    user_prompt = (
-        f"【検索クエリ】\n{query}\n"
-        f"{note_prompt}"
-        f"【候補一覧】\n" + "\n\n".join(formatted_candidates)
-    )
-
-    if _increment_stat_func:
-        _increment_stat_func("ai_requests")
-
-    try:
-        from core.settings_manager import get_setting
-        model = get_setting("ai_models.search_summary", GPT_MODEL_SEARCH_SUMMARY)
-    except Exception:
-        model = GPT_MODEL_SEARCH_SUMMARY
-
-    try:
-        response = _get_openai().chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            response_format={"type": "json_object"},
-        )
-        content = response.choices[0].message.content or ""
-        data = json.loads(_normalize_json_text(content))
-        selected_index = int(data.get("selected_index", 1))
-        reason_text = str(data.get("reason", "")).strip()
-        usage = None
-        if hasattr(response, "usage") and response.usage:
-            usage = {
-                "prompt_tokens": getattr(response.usage, "prompt_tokens", 0) or 0,
-                "completion_tokens": getattr(response.usage, "completion_tokens", 0) or 0,
-                "total_tokens": getattr(response.usage, "total_tokens", 0) or 0,
-            }
-        if selected_index <= 0:
-            return None, usage, reason_text or "候補に適切な動画がありません。"
-        selected_index = max(1, min(len(candidates), selected_index))
-        selected = dict(candidates[selected_index - 1])
-        selected["selection_reason"] = reason_text
-        return selected, usage, ""
-    except Exception as e:
-        fallback = dict(candidates[0])
-        fallback["selection_reason"] = f"AI選定失敗のため先頭候補を使用: {e}"
-        return fallback, None, ""
-
-
-def play_youtube(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_usage=None):
-    """YouTube動画を検索し、選定して埋め込み再生状態を更新する。"""
-    query = args.get("query", "").strip() if isinstance(args, dict) else ""
-    if not query:
-        if TEXT and TEXT != "none":
-            speak_voicevox(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
-        return TEXT, "YouTube再生コマンドが実行されたが、検索クエリが指定されず。"
-
-    if TEXT and TEXT != "none":
-        speak_voicevox(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
-
-    selection_mode, max_items = _get_youtube_search_options(args)
-    candidates = search_youtube_videos(query, max_items=max_items)
-    if not candidates:
-        clear_youtube_state()
-        status = f"『{query}』で有効なYouTube候補が見つからず再生を中止。"
-        return TEXT, status, status, _build_youtube_log_payload(query, selection_mode, status, candidates, canceled=True), None
-
-    if selection_mode == "user_select":
-        set_pending_youtube_selection(query, candidates, selection_mode)
-        status = f"『{query}』のYouTube候補を {len(candidates)} 件表示し、選択待機中。"
-        raw_result = _build_youtube_log_payload(
-            query,
-            selection_mode,
-            "候補を表示しました。タップまたは数字入力で選択待機中。",
-            candidates,
-            reason="候補一覧から1件を選択してください。",
-        )
-        raw_result["__emit_retry_log__"] = False
-        raw_result["__suppress_followup_retry__"] = True
-        return TEXT, status, "YouTube候補を表示しました。番号で選択してください。", raw_result, None
-
-    if selection_mode == "top_auto":
-        selected = dict(candidates[0])
-        selected["selection_reason"] = "検索結果の先頭候補をそのまま採用。"
-        youtube_payload = _set_youtube_player_state(
-            query,
-            selection_mode,
-            selected,
-            reason=selected["selection_reason"],
-            selection_source="top_auto",
-            autoplay=True,
-            muted=False,
-        )
-        dmis_log = f"『{query}』でYouTube動画を検索し、先頭候補『{selected['title']}』を再生。"
-        raw_result = _build_youtube_log_payload(query, selection_mode, dmis_log, candidates, selected=selected, reason=selected["selection_reason"])
-        raw_result["viewer"] = youtube_payload
-        return TEXT, dmis_log, selected["title"], raw_result, None
-
-    selected, selection_usage, cancel_reason = select_youtube_video(query, candidates, NOTE or "")
-    if not selected:
-        clear_youtube_state()
-        status = f"『{query}』の再生をキャンセル。{cancel_reason or '候補に適切な動画がありません。'}"
-        return TEXT, status, status, _build_youtube_log_payload(query, selection_mode, status, candidates, reason=cancel_reason, canceled=True), selection_usage
-
-    youtube_payload = _set_youtube_player_state(
-        query,
-        selection_mode,
-        selected,
-        reason=selected.get("selection_reason", ""),
-        selection_source="ai_auto",
-        autoplay=True,
-        muted=False,
-    )
-    dmis_log = f"『{query}』でYouTube動画を検索し、『{selected['title']}』を選定して再生。"
-    raw_result = _build_youtube_log_payload(
-        query,
-        selection_mode,
-        dmis_log,
-        candidates,
-        selected=selected,
-        reason=selected.get("selection_reason", ""),
-    )
-    raw_result["viewer"] = youtube_payload
-    return TEXT, dmis_log, selected["title"], raw_result, selection_usage
-
-# Spotify再生
-def play_music_from_spotify(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_usage=None):
-    query = args.get("query", "").strip() if isinstance(args, dict) else ""
-    if not query:
-        if TEXT and TEXT != "none":
-            speak_voicevox(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
-        return TEXT , "spotify音楽再生コマンドが実行されたが、検索クエリが指定されず。"
-
-    # 進捗はここで喋る
-    if TEXT and TEXT != "none":
-        speak_voicevox(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
-
-    track_info = search_and_play(query)
-    if track_info:
-        title = track_info.get("title")
-        artist = track_info.get("artist")
-        return TEXT, f"{artist}の『{title}』をSpotifyで再生。"
-    else:
-        return TEXT, f"Spotifyで『{query}』の検索を実行、Spotifyエラー。"
-
-# Spotify一時停止
-def pause_music(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_usage=None):
-    # AIが生成したTEXTをそのまま使用
-    if TEXT and TEXT != "none":
-        speak_voicevox(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
-    
-    success = pause_playback()
-    if success:
-        return TEXT, "Spotifyの再生を一時停止。"
-    else:
-        return TEXT, "Spotifyの一時停止を試みたが、エラー。"
-
-# Spotify再生再開
-def resume_music(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_usage=None):
-    # AIが生成したTEXTをそのまま使用
-    if TEXT and TEXT != "none":
-        speak_voicevox(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
-    
-    success = resume_playback()
-    if success:
-        return TEXT, "Spotifyの再生を再開。"
-    else:
-        return TEXT, "Spotifyの再生再開を試みたが、エラー。"
 
 # テキストファイル読み込み＋要約
-def text_summary_ai(file_content, kiritan_text, user_input):
-    """
-    読み込んだテキストファイルから、会話に必要な情報だけを抽出する要約AI
-    """
-    base_prompt = get_prompt_setting("text_summary")
-    
-    # テキスト要約固有の情報を追加
-    system_prompt = (
-        f"{base_prompt}\n\n"
-        f"この後にきりたんAIがあなたの出力を受けて、ユーザーに返答します。\n"
-        f"あなたは情報をきりたんAIに伝える体で出力してください。キャラクター性は不要です。\n\n"
-        f"【ユーザーの要求】\n{user_input}\n\n"
-        f"【きりたんの発言】\n{kiritan_text}\n\n"
-        f"【テキストファイル全文】\n{file_content}\n\n"
-        f"---\n"
-        f"【あなたの役割】\n"
-        f"・ユーザーの要求ときりたんの発言から意図を理解し、テキストファイルから適切な情報を抽出する\n"
-        f"・きりたんAIが答えやすい形式で情報を整理する（挨拶や問いかけは不要）\n\n"
-        f"【出力形式】\n"
-        f"・必要な情報を箇条書きまたは段落で整理\n"
-        f"・長すぎる場合は適宜情報を集約して、トークン数を削減\n"
-        f"・短すぎる場合は補足情報も含める\n"
-    )
-    
-    # 統計：GPT呼び出し回数をカウント
-    if _increment_stat_func:
-        _increment_stat_func("ai_requests")
-    
-    # モデル名を設定ファイルから取得（なければconfig.pyのデフォルト）
-    try:
-        from core.settings_manager import get_setting
-        model = get_setting("ai_models.text_summary", GPT_MODEL_TEXT_SUMMARY)
-    except:
-        model = GPT_MODEL_TEXT_SUMMARY
-    
-    client = OpenAI(api_key=OPENAI_API_KEY)
-    response = client.chat.completions.create(
-        model=model,  # 設定ファイルまたはconfig.pyから
-        messages=[{"role": "system", "content": system_prompt}]
-    )
-    content = response.choices[0].message.content
-    usage = None
-    if hasattr(response, "usage") and response.usage:
-        usage = {
-            "prompt_tokens": getattr(response.usage, "prompt_tokens", 0) or 0,
-            "completion_tokens": getattr(response.usage, "completion_tokens", 0) or 0,
-            "total_tokens": getattr(response.usage, "total_tokens", 0) or 0,
-        }
-    return content, usage
-
 
 def webpage_summary(url: str, extracted_text: str, user_input: str, note: str = ""):
     """Webページ本文を要約する（500文字程度）"""
@@ -1068,7 +699,7 @@ def read_webpage(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_
 
     # 進捗アナウンス
     if TEXT and TEXT != "none":
-        speak_voicevox(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
+        speak_response(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
 
     # Google Newsの中継URLは元記事URLへ解決してから読む
     target_url = resolve_google_news_url(url)
@@ -1093,63 +724,3 @@ def read_webpage(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_
     print(f"[READ-PAGE] {dmis_log}")
     return TEXT, dmis_log, summary, raw_text, summary_token_usage
 
-
-def read_text_file(args, TEXT, NOTE=None, ai_raw=None, processing_time=0.0, token_usage=None):
-    """
-    テキストファイルを読み込んで、要約AIで必要な情報を抽出してRETRYに渡す
-    （memoryフォルダ限定）
-    """
-    from core.file_manager import read_memory_file
-    
-    filename = args.get("filename", "").strip() if isinstance(args, dict) else ""
-    if not filename:
-        dmis_log = "テキストファイル読み込みコマンドが実行されたが、filenameが指定されず。"
-        return TEXT, dmis_log
-    
-    # 進捗アナウンス
-    if TEXT and TEXT != "none":
-        speak_voicevox(TEXT, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
-    
-    # ファイルを読み込み
-    try:
-        file_content, metadata = read_memory_file(filename)
-    except FileNotFoundError:
-        error_text = f"ファイル '{filename}' が見つかりません。"
-        print(f"[READ-TEXT] エラー: {error_text}")
-        return TEXT, error_text
-    except Exception as e:
-        error_text = f"ファイル '{filename}' の読み込みに失敗しました: {e}"
-        print(f"[READ-TEXT] エラー: {error_text}")
-        return TEXT, error_text
-    
-    print(f"[READ-TEXT] ファイル '{filename}' を読み込みました（{len(file_content)}文字）")
-    
-    use_raw = False
-    try:
-        from core.settings_manager import get_setting
-        use_raw = get_setting("text.use_raw_result", False)
-    except Exception:
-        pass
-
-    if use_raw:
-        summary = file_content  # AI要約をスキップし、ファイル全文をそのままメインループへ
-        dmis_log = f"テキストファイル『{filename}』を読み込み（生データをメインループへ）。"
-        summary_token_usage = None
-    else:
-        # 要約AIで必要な情報を抽出
-        user_input = get_last_user_input()
-        kiritan_text = TEXT or "テキストファイルを読み込み中"
-        
-        # メタデータの説明があればコンテキストに追加
-        context_info = ""
-        if metadata and "description" in metadata:
-            context_info = f"【ファイル説明】{metadata['description']}\n"
-            
-        summary, summary_token_usage = text_summary_ai(context_info + file_content, kiritan_text, user_input)
-        original_len = len(file_content)
-        summary_len = len(summary)
-        dmis_log = f"テキストファイル『{filename}』の要約を生成。({original_len}文字→{summary_len}文字)"
-    print(f"[READ-TEXT] {dmis_log}")
-    
-    # RETRYに要約を渡す。raw_result はRETRYモーダルで確認用
-    return TEXT, dmis_log, summary, file_content, summary_token_usage

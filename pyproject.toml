@@ -1,26 +1,19 @@
 [project]
-name = "dkis"
-version = "1.0.1"
-description = "DKIS - Flask ベースのチャットボットシステム「東北きりたん」"
+name = "dkis-line"
+version = "0.1.0"
+description = "DKIS-LINE - Web/LINE向けの軽量テキストチャットアプリ"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     # Web フレームワーク
     "flask>=3.0.0",
     "flask-cors>=4.0.0",
-    
     # AI / API クライアント
     "openai>=1.0.0",
-    
     # HTTP クライアント
     "requests>=2.31.0",
-    
     # Webスクレイピング（READ-PAGE用）
     "trafilatura>=2.0.0",
-    
-    # Spotify API
-    "spotipy>=2.23.0",
-    
     # 文字エンコーディング検出
     "chardet>=5.0.0",
 ]

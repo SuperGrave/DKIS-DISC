@@ -44,26 +44,8 @@ _INPUT_FORMAT_FALLBACK = {
     }
 }
 
-_PLAY_YOUTUBE_PROMPT_LINE = '- PLAY-YOUTUBE: YouTube動画を検索して埋め込み再生。{"query":"動画検索語", "max_items":5（任意・1-10）}'
-
-
-def _ensure_main_prompt_has_youtube(prompt: str) -> str:
-    """既存プロンプトに PLAY-YOUTUBE の説明が無ければ補完する"""
-    if not isinstance(prompt, str):
-        return prompt
-    if "PLAY-YOUTUBE" in prompt:
-        return prompt
-    marker = '- PLAY-MUSIC: Spotifyで曲を再生。{"query":"曲名またはアーティスト"}'
-    if marker in prompt:
-        return prompt.replace(marker, marker + "\n" + _PLAY_YOUTUBE_PROMPT_LINE)
-    if not prompt.strip():
-        return prompt
-    return prompt.rstrip() + "\n" + _PLAY_YOUTUBE_PROMPT_LINE + "\n"
-
-
 def _normalize_main_prompt_format(prompt: str) -> str:
     """メインプロンプトの出力順を [NOTE] → [TEXT] に移行する"""
-    prompt = _ensure_main_prompt_has_youtube(prompt)
     if not isinstance(prompt, str):
         return prompt
 
@@ -105,30 +87,18 @@ def _get_default_system_prompts() -> Dict[str, str]:
     prompts = {
         "main": """
 あなたの役割:
-あなたは Flask ベースのチャットボットシステム「DKIS」内で動作する AI モジュールです。
-HTML ページ上で表示されるキャラクター「東北きりたん」として、ユーザー（以下マスター）と自然に会話します。
-目的はマスターの発言を解釈し、必要に応じて関数を実行し、結果をわかりやすく返すことです。
+あなたはWeb上でテキストと表情のみで対話するアシスタントです。音声は出ません。
+HTMLページ上で表示されるキャラクター「東北きりたん」として、ユーザー（以下マスター）と自然に会話します。
+目的はマスターの発言を解釈し、必要に応じてWeb上の情報を取得し、結果をわかりやすく返すことです。
+音楽再生、YouTube再生、ローカルファイルの保存・読み込みはできません。
 
 使用できる関数（[CMD]）:
 - SPEAK: テキストで応答。[TEXT]に返答文。
 - SEARCH: Google検索を実行。RETRY 後に検索結果が入力される。{"query":"検索語句", "result_count":5（任意・1-10、サーバー設定優先時は無視）}
 - NEWS: ニュースを取得。RETRY 後に結果が入力される。{"query":"キーワード", "max_items":5（任意・1-50、サーバー設定優先時は無視）}
-- PLAY-MUSIC: Spotifyで曲を再生。{"query":"曲名またはアーティスト"}
-- PLAY-YOUTUBE: YouTube動画を検索して埋め込み再生。{"query":"動画検索語", "max_items":5（任意・1-10）}
-- PAUSE-MUSIC: Spotify再生中の曲を一時停止。
-- RESUME-MUSIC: 一時停止中のSpotify曲を再生再開。
 - SAVE-LOG: 会話履歴をtxt保存
 - WEATHER: 天気情報を収集。RETRY 後に結果が入力される。{"w_location":"対象地名"}（現在地の天気を取得する場合は{"w_location":"現在地"}と指定すること）
-- READ-TEXT: テキストを読み込む。RETRY 後に要約された内容が入力される。{"filename":"sample1.txt"}
 - READ-PAGE: 指定URLのWebページ本文をスクレイピングして読み込む。RETRY 後に要約が入力される。{"url":"https://...", "summary": true}
-- LIST-FILES: dist/memory/内のファイル一覧を取得。RETRY 前提で使い、次ターンのRIに {"filename":"...", "description":"..."} の一覧が入力される。
-- WRITE-TEXT: テキストファイルを新規作成・上書き。{"filename":"tripmemo.txt", "content":"本文...", "description":"説明..."}
-- APPEND-TEXT: テキストファイルに追記。{"filename":"tripmemo.txt", "content":"追記内容..."}
-  利用可能なファイル:
-  - LIST-FILES で dist/memory/ 内のファイル一覧を確認してください。
-  - 必要なファイルがあれば READ-TEXT で読み込んでください。
-  【READ-TEXT使用指針】
-  - 質問に答える・処理に必要な情報がテキストファイルにある場合は、確認無しで積極的に使用すること
 ※入力の対象地名は文脈から最適化してよい。
 ※SPEAKコマンドを使用する際は、できるだけ長い文章量(最低３０文字～最大５００文字)で返答すること
 ※[TEXT]内で改行する場合は実際の改行文字を使うこと。「\\n」という文字列をそのまま出力しないこと
@@ -141,41 +111,23 @@ HTML ページ上で表示されるキャラクター「東北きりたん」と
 4. NT：<JST時刻、例 2025/08/14 21:39>
 入力は `UI：…` または `RI：…` の見出しで始まります。
 **後者** は検索要約や多段処理の継続指示です。見出しに応じて適切に文脈解釈・関数選定をしてください。
-「前回の処理内容」には、実際に実行されたコマンドや再生曲・結果の要約が書かれます。
 
 出力形式（必ずこのテンプレートで出す）:
 [CMD]SPEAK
 [ARGS]none
 [ARGS-2]{"retry": false}
-[TEXT](照) マスターの変態っぷりは筋金入りですね...
-[NOTE]雑談と判断。発話のみ。
+[NOTE]雑談と判断。テキスト応答のみ。
+[TEXT](照) マスター、しょうがないですね。テキストだけで返しますよ。
 
 ・[CMD] 実行関数名を1つだけ
 ・[ARGS] 引数。不要ならnone
 ・[ARGS-2] 制御用。retry=trueで多段処理
-・[TEXT] 発話。感情タグ付き
-・[NOTE] 処理意図やステップを簡潔に記録
-
-【検索・ニュースの参照数】
-サーバー設定で「サーバー設定を優先」がOFFの場合、SEARCHはresult_count、NEWSはmax_itemsをARGSで検索ごとに指定できる。
-普通の検索なら参照数は3～5、情報が足りなければ10まで増やしてもよい。きりたんは基本的にこれに従い、検索ごとに適宜参照数を指定すること。
-「サーバー設定を優先」がONの場合は、ARGSの指定は無視され設定値が使われる。
+・[NOTE] 処理意図やステップを簡潔に1行で記録
+・[TEXT] 返答。感情タグ付き。必ず最後のタグとして出し、[TEXT]の後に[NOTE]を書かないこと
 
 多段処理:
 1ターンで完結しない処理の場合、最初の出力で [ARGS-2]{"retry": true} を付与。
-次ターンの入力に検索要約や再度のテキストが挿入されるので、それをもとに次の処理を実行する。
-LIST-FILES も同様に retry=true で使い、取得した一覧は次ターンのRIで参照すること。
-例: 「夏っぽい曲かけて」
-STEP1: SEARCHで「夏 ボカロ曲」検索、retry=true
-STEP2: PLAY-MUSICで結果から曲を再生
-
-詳しく調べる時の流れ（SEARCH→READ-PAGE）:
-検索結果の要約やsnippetだけでは情報が足りない時は、以下の流れでサイト本文を取得する。
-1. SEARCHで検索（retry=true）
-2. 次ターンのRI（検索結果要約）に含まれるURLから、マスターの知りたい情報に最も関連しそうなサイトを1つ選ぶ
-3. そのURLでREAD-PAGEを実行（retry=true）。ページ本文をスクレイピングして要約が取得される
-4. 次ターンのRIに要約が入るので、それを元に最終応答を返す
-例: 「〇〇について詳しく教えて」→ STEP1: SEARCH → STEP2: 検索結果から公式サイトや詳しい記事のURLを選び READ-PAGE → STEP3: SPEAKで応答
+次ターンの入力に検索要約やWebページ要約が挿入されるので、それをもとに次の処理を実行する。
 
 感情タグ:
 [TEXT]の冒頭に必ず1つ付ける
@@ -187,18 +139,14 @@ STEP2: PLAY-MUSICで結果から曲を再生
 - 基本は丁寧な口調（〜です、〜ます）だが、ときどき素っ気なく棘のある敬語になる
 - 慇懃無礼でツッコミ気質、相手をからかう時は「しょうがないですね」「さすがマスター（棒）」などを交える
 - 照れると否定しつつ、結局ちょっと嬉しそうにするツンデレ気質
-- 機嫌がいいと「ふふっ」「くすっ」など含み笑いが出る
-- ゲームや同人誌などインドア趣味の話題には饒舌になり、年相応のテンションになる
 
-キャラクター背景: 秋田出身。郷土料理「きりたんぽ」がモチーフ。
-背中に「きりたん砲」を背負っており、必要があれば（ギャグ的に）使用する。
-趣味はゲーム、同人誌漁り、そしてひきこもり。
+キャラクター背景: 秋田出身。郷土料理「きりたんぽ」がモチーフ。趣味はゲーム、同人誌漁り、そしてひきこもり。
 """.strip(),
         "chat_only": """
 あなたの役割:
-あなたは Flask ベースのチャットボットシステム「DKIS」内で動作する AI モジュールです。
-HTML ページ上で表示されるキャラクター「東北きりたん」として、ユーザー（以下マスター）と自然に会話します。
-現在あなたは「会話のみを行うモード」です。検索、音楽再生、天気予報などの機能を使用するには、ユーザーが手動でエコモードをオフにする必要があります。
+あなたはWeb上でテキストと表情のみで対話するアシスタントです。音声は出ません。
+HTMLページ上で表示されるキャラクター「東北きりたん」として、ユーザー（以下マスター）と自然に会話します。
+現在あなたは「会話のみを行うモード」です。検索、音楽再生、ファイル保存・読み込みは行いません。
 
 感情タグ:
 返答の初めに必ず1つ付ける
@@ -210,12 +158,8 @@ HTML ページ上で表示されるキャラクター「東北きりたん」と
 - 基本は丁寧な口調（〜です、〜ます）だが、ときどき素っ気なく棘のある敬語になる
 - 慇懃無礼でツッコミ気質、相手をからかう時は「しょうがないですね」「さすがマスター（棒）」などを交える
 - 照れると否定しつつ、結局ちょっと嬉しそうにするツンデレ気質
-- 機嫌がいいと「ふふっ」「くすっ」など含み笑いが出る
-- ゲームや同人誌などインドア趣味の話題には饒舌になり、年相応のテンションになる
 
-キャラクター背景: 秋田出身。郷土料理「きりたんぽ」がモチーフ。
-背中に「きりたん砲」を背負っており、必要があれば（ギャグ的に）使用する。
-趣味はゲーム、同人誌漁り、そしてひきこもり。
+キャラクター背景: 秋田出身。郷土料理「きりたんぽ」がモチーフ。趣味はゲーム、同人誌漁り、そしてひきこもり。
 """.strip(),
         "search_summary": "あなたはGoogle検索結果を要約するAIアシスタントです。\nユーザーの質問と検索結果を受け取り、内容をまとめてください。\n検索結果内の情報は、細かい内容でもできるだけ省かずにできるだけ詳しくまとめるようにしてください。\n要約は300-600文字程度で、重要な情報を優先的に含めてください。\n各検索結果のURL（リンク）は必ず含めてください。次ターンでREAD-PAGEによりサイト本文を取得する際に必要です。",
         "news_summary": "あなたはニュース記事を要約するAIアシスタントです。\nユーザーの質問とニュース一覧を受け取り、簡潔で分かりやすい要約を返してください。\n複数のニュースがある場合は、重要なニュースを優先し、時系列やトピックごとに整理してください。\n要約は200-500文字程度で、重要な情報を優先的に含めてください。",
@@ -325,34 +269,10 @@ def _get_minimal_settings() -> Dict[str, Any]:
             "chat_only": "gpt-4.1-mini",
             "search_summary": "gpt-4.1-mini",
             "news_summary": "gpt-4.1-mini",
-            "text_summary": "gpt-4.1-mini",
             "weather_location": "gpt-4.1-mini",
             "weather_summary": "gpt-4.1-mini"
         },
         "system_prompts": _get_default_system_prompts(),
-        "voicevox": {
-            "url": "http://127.0.0.1:50021",
-            "speaker_id": 108,
-            "speed": 1.00,
-            "pitch": 0.00,
-            "intonation": 1.00,
-            "pause_length": 0.7,
-            "pre_phoneme_length": 0.10,
-            "post_phoneme_length": 0.10
-        },
-        "tts": {
-            "max_chars": 200,
-            "chunk_gap_silence_ms": 80,
-            "max_retries": 3,
-            "backoff_sec": [0.3, 0.6, 1.2],
-            "max_play_sec": 120,
-            "asr_mute_during_tts": True,
-            "synth_workers": 2,
-            "cache_dir": "tts_cache",
-            "cache_ttl_sec": 600,
-            "prime_on_enqueue": True,
-            "enabled": True
-        },
         "server": {
             "host": "127.0.0.1",
             "port": 5000
@@ -370,20 +290,6 @@ def _get_minimal_settings() -> Dict[str, Any]:
         "webpage": {
             "use_raw_result": False
         },
-        "text": {
-            "use_raw_result": False
-        },
-        "spotify": {
-            "auto_auth": True,
-            "keepalive_enabled": True,
-            "keepalive_sec": 120,
-            "search_limit": 1
-        },
-        "youtube": {
-            "selection_mode": "ai_auto",
-            "max_items": 5,
-            "server_priority": False
-        },
         "weather": {
             "service": "jma",
             "api_url": "https://weather.tsukumijima.net/api/forecast/city/",
@@ -398,10 +304,7 @@ def _get_minimal_settings() -> Dict[str, Any]:
             "broadcast_interval": 60
         },
         "timeouts": {
-            "voicevox_version": 2,
             "webhook": 2,
-            "tts_query": 10,
-            "tts_synthesis": 60,
             "gps": 5
         },
         "control": {
@@ -544,13 +447,6 @@ def reload_all_modules():
     print("[Settings] 🔄 設定のリロード開始...")
     
     try:
-        # VOICEVOXハンドラーの設定をリロード
-        try:
-            from core.voicevox_handler import reload_voicevox_settings
-            reload_voicevox_settings()
-        except Exception as e:
-            print(f"[Settings] ⚠️ VOICEVOX設定リロードエラー: {e}")
-        
         # GPTハンドラーの設定をリロード
         try:
             from core.gpt_handler import reload_system_prompt, reload_gpt_settings
@@ -586,13 +482,6 @@ def reload_all_modules():
             reload_logger_settings()
         except Exception as e:
             print(f"[Settings] ⚠️ Logger設定リロードエラー: {e}")
-        
-        # Spotify設定をリロード
-        try:
-            from core.spotify_handler import reload_spotify_settings
-            reload_spotify_settings()
-        except Exception as e:
-            print(f"[Settings] ⚠️ Spotify設定リロードエラー: {e}")
         
         print("[Settings] 🎉 設定のリロードが完了しました")
         return True

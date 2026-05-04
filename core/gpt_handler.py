@@ -11,11 +11,9 @@ from core.context_provider import (
 )
 from core.functions import (
     chat_response, save_log,
-    search_google, search_news, play_music_from_spotify, play_youtube, get_weather,
-    pause_music, resume_music, read_text_file, read_webpage,
-    list_files_command, write_text_command, append_text_command
+    search_google, search_news, get_weather, read_webpage,
 )
-from core.voicevox_handler import speak_voicevox  # 未対応コマンド時の音声用
+from core.response_handler import speak_response
 from core.logger import append_log_pretty  # 新ロガー（#n / USER INPUT / AI RAW / RETRY 対応）
 from core.input_builder import build_input_segments
 
@@ -159,16 +157,8 @@ command_handlers = {
     "SAVE-LOG": save_log,
     "SEARCH": search_google,
     "NEWS": search_news,
-    "PLAY-MUSIC": play_music_from_spotify,
-    "PLAY-YOUTUBE": play_youtube,
-    "PAUSE-MUSIC": pause_music,
-    "RESUME-MUSIC": resume_music,
     "WEATHER": get_weather,
-    "READ-TEXT": read_text_file,
     "READ-PAGE": read_webpage,
-    "LIST-FILES": list_files_command,
-    "WRITE-TEXT": write_text_command,
-    "APPEND-TEXT": append_text_command,
 }
 
 def ask_chatgpt(user_text: str) -> tuple[str, dict | None]:
@@ -293,7 +283,7 @@ def parse_ai_response(text: str) -> dict:
 def execute_command(parsed: dict, user_input: str, ai_raw: str = None, processing_time: float = 0.0, token_usage: dict = None):
     """
     ここでは一切 SSE を送らない。
-    - SPEAK/SEARCH/WEATHER 等の実コマンドは、関数内で speak_voicevox() を呼ぶ実装にしておく。
+    - SPEAK/SEARCH/WEATHER 等の実コマンドは、関数内で speak_response() を呼ぶ実装にしておく。
     - 未対応コマンドのみ、ここでフォールバック発話を行う。
     """
     command = (parsed.get("CMD") or "SPEAK").strip().upper()
@@ -303,7 +293,7 @@ def execute_command(parsed: dict, user_input: str, ai_raw: str = None, processin
     # パース失敗検知（CMDがなく、TEXTも空で、でも元のAI出力はある場合）
     if parsed.get("CMD") is None and not TEXT and ai_raw and ai_raw.strip():
         error_msg = f"（AI出力エラー：無効なフォーマットを検知しました）\n\n[RAW OUTPUT]\n{ai_raw}"
-        speak_voicevox(error_msg, silent=True, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
+        speak_response(error_msg, silent=True, ai_raw=ai_raw, processing_time=processing_time, token_usage=token_usage)
         return error_msg, False, "AI出力パースエラー", error_msg, None, None
 
     if not isinstance(args, dict):
@@ -335,7 +325,7 @@ def execute_command(parsed: dict, user_input: str, ai_raw: str = None, processin
         summary = TEXT
         raw_result = None
         summary_token_usage = None
-        speak_voicevox(TEXT, ai_raw=ai_raw, token_usage=token_usage)
+        speak_response(TEXT, ai_raw=ai_raw, token_usage=token_usage)
 
     # 6値返し（TEXT, should_retry, dmis_log, summary, raw_result, summary_token_usage）
     should_retry = False

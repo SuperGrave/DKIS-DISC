@@ -234,35 +234,6 @@ def create_sse_blueprint(deps: dict) -> Blueprint:
 
         return jsonify({"ok": True, "removed": bool(removed_client)})
 
-    @bp.route("/notify/synth_start", methods=["POST"], endpoint="notify_synth_start_handler")
-    def notify_synth_start_handler_route():
-        data = request.get_json(silent=True) or {}
-        uid = data.get("utter_id")
-        seg_idx = data.get("segment_index")
-        text = data.get("text", "")
-        if not uid:
-            return jsonify({"ok": False, "error": "missing utter_id"}), 400
-        send_event("synth_start", {"utter_id": uid, "segment_index": seg_idx, "text": text})
-        return jsonify({"ok": True})
-
-    @bp.route("/notify/synth_done", methods=["POST"], endpoint="notify_synth_done_handler")
-    def notify_synth_done_handler_route():
-        data = request.get_json(silent=True) or {}
-        uid = data.get("utter_id")
-        seg_idx = data.get("segment_index")
-        url = data.get("url", "")
-        text = data.get("text", "")
-        synthesis_time = data.get("synthesis_time", 0.0)
-        synthesis_utter_id = data.get("synthesis_utter_id")
-        if not uid or not url:
-            return jsonify({"ok": False, "error": "missing data"}), 400
-        event_data = {"utter_id": uid, "segment_index": seg_idx, "url": url, "text": text}
-        if synthesis_time > 0 and synthesis_utter_id:
-            event_data["synthesis_time"] = synthesis_time
-            event_data["synthesis_utter_id"] = synthesis_utter_id
-        send_event("synth_done", event_data)
-        return jsonify({"ok": True})
-
     @bp.route("/notify/retry_input", methods=["POST"], endpoint="notify_retry_input")
     def notify_retry_input_route():
         data = request.get_json(silent=True) or {}
@@ -270,7 +241,7 @@ def create_sse_blueprint(deps: dict) -> Blueprint:
         retry_total = data.get("retry_total", 1)
         retry_content = data.get("retry_content", "")
         raw_result = data.get("raw_result")  # AI整形前の検索結果・読み込んだページの生データなど
-        raw_result_source = data.get("raw_result_source")  # READ-PAGE, SEARCH, READ-TEXT 等
+        raw_result_source = data.get("raw_result_source")  # READ-PAGE, SEARCH 等
         token_usage = data.get("token_usage")  # AI要約の消費トークン（検索・ニュース・READ-PAGE等）
         global_retry_id = data.get("global_retry_id", 0)
         conversation_retry_id = data.get("conversation_retry_id", 0)
