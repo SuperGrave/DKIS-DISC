@@ -41,7 +41,8 @@ uv run gunicorn --bind "127.0.0.1:5000" --workers 1 'line_bot_app.app:create_app
 ```
 
 **開発用コンソール（LINE と同じ応答経路）**  
-Webhook を立てずに `AIResponder.reply` を試すときは `uv run python dev_console.py`。複数バブルになる長文は `split_line_text` どおりに区切って表示します。**本番デプロイ前に `dev_console.py` は削除する想定**です。
+Webhook を立てずに `AIResponder.reply` を試すときは `uv run python dev_console.py`。複数バブルになる長文は `split_line_text` どおりに区切って表示します。**本番デプロイ前に `dev_console.py` は削除する想定**です。  
+（LINE Bot SDK は Python 3.14 では Pydantic 関連の警告や import の重さが出やすいので、**3.12〜3.13 推奨**。本番は `render.yaml` の `pythonVersion` に合わせてください。）
 
 ## 本番デプロイ（Render.com・Blueprint）
 
