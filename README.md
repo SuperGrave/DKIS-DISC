@@ -4,7 +4,9 @@ LINE 上で動作する **DKIS 互換の軽量 AI ボット**です。Flask の 
 
 ## 作業ディレクトリ（よくあるエラー対策）
 
-`pyproject.toml` と `.venv` は **`DKIS` フォルダ直下**にあります。親フォルダ（例: `DKIS-LINE`）だけ開いている場合は、ターミナルで **`cd DKIS`** してから `uv sync` / `uv run` を実行してください。`.env` は **`DKIS` 直下**に置き、`LINE_CHANNEL_SECRET`・`LINE_CHANNEL_ACCESS_TOKEN`・`OPENAI_API_KEY` を設定してください（テンプレートは **`.env.example`**。空の **`.env`** を自分で作っても同じです）。
+`pyproject.toml` と `.venv` は **`DKIS` フォルダ直下**にあります。親フォルダ（例: `DKIS-LINE`）だけ開いている場合は、ターミナルで **`cd DKIS`** してから `uv sync` / `uv run` を実行してください。`.env` は **`DKIS` 直下**に置きます（テンプレートは **`.env.example`**）。
+
+`.env` の書き方は **`変数名=値`** の1行で、**イコールの直後に値を貼り付ければそのまま動く**ことが多いです（値の前後にスペースは入れない／行末に余計な `"` は付けない）。
 
 ## 機能概要
 
@@ -17,11 +19,15 @@ LINE 上で動作する **DKIS 互換の軽量 AI ボット**です。Flask の 
 
 ## Environment Variables
 
-### 必須
+### Webhook・`main.py`・本番（LINE ボットとして動かすとき）
 
 - `LINE_CHANNEL_SECRET`
 - `LINE_CHANNEL_ACCESS_TOKEN`
 - `OPENAI_API_KEY`
+
+### `dev_console.py` だけ試すとき
+
+- **`OPENAI_API_KEY` のみ必須**（LINE の2つは未設定でも起動します）
 
 ### 任意
 
@@ -47,7 +53,7 @@ uv run gunicorn --bind "127.0.0.1:5000" --workers 1 'line_bot_app.app:create_app
 ```
 
 **開発用コンソール（LINE と同じ応答経路）**  
-Webhook を立てずに `AIResponder.reply` を試すときは `uv run python dev_console.py`。複数バブルになる長文は `split_line_text` どおりに区切って表示します。**本番デプロイ前に `dev_console.py` は削除する想定**です。  
+Webhook を立てずに `AIResponder.reply` を試すときは `uv run python dev_console.py`。**このときは `.env` に `OPENAI_API_KEY` だけあれば足ります**（LINE のシークレット／トークンは不要）。複数バブルになる長文は `split_line_text` どおりに区切って表示します。**本番デプロイ前に `dev_console.py` は削除する想定**です。  
 （`.python-version` で 3.12 に揃えている想定。別版で動かす場合は LINE Bot SDK と Python の組み合わせに注意。）
 
 ## 本番デプロイ（Render.com・Blueprint）

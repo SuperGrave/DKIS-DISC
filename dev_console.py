@@ -28,14 +28,15 @@ def main() -> None:
 
     load_dotenv(_PROJECT_ROOT / ".env")
     try:
-        config = load_config()
+        config = load_config(require_line_credentials=False)
     except RuntimeError as exc:
         print(exc)
         print()
         print("対処:")
         print(f"  1. 次のフォルダで実行しているか確認（ここに pyproject.toml と .env がある想定）:")
         print(f"     {_PROJECT_ROOT}")
-        print("  2. .env が無い場合: .env.example をコピーし、LINE_* と OPENAI_API_KEY を埋める。")
+        print("  2. .env に OPENAI_API_KEY=（イコールの右にキーを貼り付け）を記入。")
+        print("     （開発コンソールでは LINE の値は不要。Webhook / main.py では必須。）")
         sys.exit(1)
     brain = AIResponder(config)
 

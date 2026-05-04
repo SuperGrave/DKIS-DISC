@@ -1,6 +1,6 @@
 [project]
 name = "dkis-ll"
-version = "0.4.7"
+version = "0.4.8"
 description = "DKIS-LL — LINE上で動作するDKIS互換の軽量AIボット（Flask Webhook + OpenAI + ツール連携）。Web UI・音声・メディア再生なし。"
 readme = "README.md"
 requires-python = ">=3.12"

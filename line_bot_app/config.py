@@ -22,22 +22,34 @@ class AppConfig:
     google_cx: str | None
 
 
-def load_config() -> AppConfig:
-    missing = [
-        name
-        for name in ("LINE_CHANNEL_SECRET", "LINE_CHANNEL_ACCESS_TOKEN", "OPENAI_API_KEY")
-        if not os.environ.get(name)
-    ]
+_DEV_CONSOLE_LINE_PLACEHOLDER = "unused-dev-console"
+
+
+def load_config(*, require_line_credentials: bool = True) -> AppConfig:
+    """Webhook 起動時は LINE の必須変数もチェックする。開発コンソールだけ試すときは False にできる。"""
+    missing = [name for name in ("OPENAI_API_KEY",) if not (os.environ.get(name) or "").strip()]
+    if require_line_credentials:
+        missing.extend(
+            name
+            for name in ("LINE_CHANNEL_SECRET", "LINE_CHANNEL_ACCESS_TOKEN")
+            if not (os.environ.get(name) or "").strip()
+        )
     if missing:
         joined = ", ".join(missing)
         raise RuntimeError(f"Missing required environment variables: {joined}")
 
     js = load_json_settings()
 
+    line_secret = (os.environ.get("LINE_CHANNEL_SECRET") or "").strip()
+    line_token = (os.environ.get("LINE_CHANNEL_ACCESS_TOKEN") or "").strip()
+    if not require_line_credentials:
+        line_secret = line_secret or _DEV_CONSOLE_LINE_PLACEHOLDER
+        line_token = line_token or _DEV_CONSOLE_LINE_PLACEHOLDER
+
     return AppConfig(
-        line_channel_secret=os.environ["LINE_CHANNEL_SECRET"],
-        line_channel_access_token=os.environ["LINE_CHANNEL_ACCESS_TOKEN"],
-        openai_api_key=os.environ["OPENAI_API_KEY"],
+        line_channel_secret=line_secret,
+        line_channel_access_token=line_token,
+        openai_api_key=(os.environ.get("OPENAI_API_KEY") or "").strip(),
         settings_source=str(js.path),
         system_prompt=js.system_prompt_main,
         openai_model=js.openai_model,
