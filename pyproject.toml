@@ -1,13 +1,14 @@
 [project]
-name = "dkis-line"
-version = "0.4.0"
-description = "DKIS-LINE - LINE Bot専用の軽量AIチャットアプリ"
+name = "dkis-ll"
+version = "0.4.2"
+description = "DKIS-LL — LINE上で動作するDKIS互換の軽量AIボット（Flask Webhook + OpenAI + ツール連携）。Web UI・音声・メディア再生なし。"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     # Web フレームワーク
     "flask>=3.0.0",
     # AI / API クライアント
+    "gunicorn>=25.3.0",
     "line-bot-sdk>=3.23.0",
     "openai>=1.0.0",
     "python-dotenv>=1.2.2",

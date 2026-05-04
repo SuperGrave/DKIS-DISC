@@ -1,6 +1,6 @@
-# DKIS-LINE
+# DKIS-LL
 
-LINE Bot 専用の軽量 Flask アプリです。Web フロントエンド、SSE、音声合成、メディア再生、ローカルファイル操作は含めません。
+LINE 上で動作する **DKIS 互換の軽量 AI ボット**です。Flask の Webhook と OpenAI、`dist/settings.json` で定義されたツール（検索・ニュース・天気・ページ読込）を組み合わせます。**Web フロント・SSE・音声・メディア再生・ローカルファイル操作は含みません。**
 
 ## 機能概要
 
@@ -13,22 +13,56 @@ LINE Bot 専用の軽量 Flask アプリです。Web フロントエンド、SSE
 
 ## Environment Variables
 
+### 必須
+
 - `LINE_CHANNEL_SECRET`
 - `LINE_CHANNEL_ACCESS_TOKEN`
 - `OPENAI_API_KEY`
-- `DKIS_SETTINGS_PATH`（任意・既定はリポジトリ内の `dist/settings.json`）
-- `GOOGLE_API_KEY` / `GOOGLE_CX`（任意、`SEARCH` 用）
-- `PORT`（任意、既定: `5000`）
 
-## Run Locally
+### 任意
+
+- `DKIS_SETTINGS_PATH`（既定はリポジトリ内の `dist/settings.json`）
+- `GOOGLE_API_KEY` / `GOOGLE_CX`（`SEARCH` 用）
+- `PORT`（ローカル既定 `5000`。Render 等ではプラットフォームが自動設定）
+
+## ローカル開発
 
 ```bash
 uv sync
-uv run python main.py
+cp .env.example .env   # 値を編集
+uv run python main.py  # Flask 開発サーバー（`main.py` の app.run）
 ```
 
-LINE Developers の Webhook URL には、デプロイ先の `https://.../webhook` を設定してください。
-# DKIS マルチPC開発ガイド（USB持ち運び運用）
+本番と同じ **gunicorn** で試す場合:
+
+```bash
+uv sync
+uv run gunicorn --bind "127.0.0.1:5000" --workers 1 'line_bot_app.app:create_app()' --factory
+```
+
+## 本番デプロイ（Render.com・Blueprint）
+
+1. このリポジトリを GitHub に push する。
+2. [Render Dashboard](https://dashboard.render.com/) → **New** → **Blueprint**。
+3. リポジトリを選び、ルートの **`render.yaml`** を検出して作成する。
+4. サービスの **Environment** で次を **ダッシュボードから入力**する（`render.yaml` の `sync: false` のため、値は Git に書かない）。
+   - `LINE_CHANNEL_SECRET`
+   - `LINE_CHANNEL_ACCESS_TOKEN`
+   - `OPENAI_API_KEY`
+5. デプロイ後の URL を LINE Developers の **Webhook URL** に  
+   `https://<サービス名>.onrender.com/webhook` の形式で設定する（**HTTPS 必須**）。
+6. `GET /` が `{"ok":true,"service":"dkis-ll-bot",...}` を返せば疎通 OK。
+
+**Render 設定の要点**
+
+- **ビルド**: `uv` を公式インストーラで入れ、`uv sync` で依存解決（`render.yaml` 参照）。
+- **起動**: `gunicorn` の **アプリケーション工場**モード（`'line_bot_app.app:create_app()' --factory`）。
+- 無料プランはスリープがあり、初回応答が遅れることがあります。
+- `dist/settings.json` を別パスにしたい場合は `DKIS_SETTINGS_PATH` を Render の環境変数に追加する。
+
+---
+
+## DKIS マルチPC開発ガイド（USB持ち運び運用）
 
 このプロジェクトを USB メモリで持ち運びつつ、**このPC**と**別PC**の両方で安全に開発するための手順です。  
 （Windows + PowerShell 前提）

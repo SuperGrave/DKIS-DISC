@@ -1,0 +1,19 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# シークレットは Dashboard の Environment で設定（sync: false）。
+
+services:
+  - type: web
+    name: dkis-line-bot
+    runtime: python
+    pythonVersion: "3.12"
+    plan: free
+    region: singapore
+    buildCommand: curl -LsSf https://astral.sh/uv/install.sh | sh && export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH" && uv sync
+    startCommand: export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH" && uv run gunicorn --bind 0.0.0.0:$PORT --workers 1 'line_bot_app.app:create_app()' --factory
+    envVars:
+      - key: LINE_CHANNEL_SECRET
+        sync: false
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false

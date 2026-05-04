@@ -7,5 +7,6 @@ app = create_app()
 if __name__ == "__main__":
     import os
 
+    # 本番は gunicorn（render.yaml）。ローカル開発・検証用のみ Flask の開発サーバーを使用。
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
