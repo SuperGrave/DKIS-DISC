@@ -4,7 +4,7 @@ LINE 上で動作する **DKIS 互換の軽量 AI ボット**です。Flask の 
 
 ## 作業ディレクトリ（よくあるエラー対策）
 
-`pyproject.toml` と `.venv` は **`DKIS` フォルダ直下**にあります。親フォルダ（例: `DKIS-LINE`）だけ開いている場合は、ターミナルで **`cd DKIS`** してから `uv sync` / `uv run` を実行してください。`.env` も **`DKIS` 直下**に置き、`LINE_CHANNEL_SECRET`・`LINE_CHANNEL_ACCESS_TOKEN`・`OPENAI_API_KEY` を設定してください（`.env.example` をコピー）。
+`pyproject.toml` と `.venv` は **`DKIS` フォルダ直下**にあります。親フォルダ（例: `DKIS-LINE`）だけ開いている場合は、ターミナルで **`cd DKIS`** してから `uv sync` / `uv run` を実行してください。`.env` は **`DKIS` 直下**に置き、`LINE_CHANNEL_SECRET`・`LINE_CHANNEL_ACCESS_TOKEN`・`OPENAI_API_KEY` を設定してください（テンプレートは **`.env.example`**。空の **`.env`** を自分で作っても同じです）。
 
 ## 機能概要
 
