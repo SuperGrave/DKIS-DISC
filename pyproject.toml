@@ -1,21 +1,16 @@
 [project]
 name = "dkis-line"
-version = "0.1.0"
-description = "DKIS-LINE - Web/LINE向けの軽量テキストチャットアプリ"
+version = "0.2.0"
+description = "DKIS-LINE - LINE Bot専用の軽量AIチャットアプリ"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     # Web フレームワーク
     "flask>=3.0.0",
-    "flask-cors>=4.0.0",
     # AI / API クライアント
+    "line-bot-sdk>=3.23.0",
     "openai>=1.0.0",
-    # HTTP クライアント
-    "requests>=2.31.0",
-    # Webスクレイピング（READ-PAGE用）
-    "trafilatura>=2.0.0",
-    # 文字エンコーディング検出
-    "chardet>=5.0.0",
+    "python-dotenv>=1.2.2",
 ]
 
 # 開発用の依存関係（uv 最新形式）

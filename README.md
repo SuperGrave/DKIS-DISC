@@ -1,3 +1,24 @@
+# DKIS-LINE
+
+LINE Bot 専用の軽量 Flask アプリです。Web フロントエンド、SSE、音声合成、メディア再生、ローカルファイル操作は含めません。
+
+## Environment Variables
+
+- `LINE_CHANNEL_SECRET`
+- `LINE_CHANNEL_ACCESS_TOKEN`
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`（任意、既定: `gpt-4.1-mini`）
+- `DKIS_SYSTEM_PROMPT`（任意）
+- `PORT`（任意、既定: `5000`）
+
+## Run Locally
+
+```bash
+uv sync
+uv run python main.py
+```
+
+LINE Developers の Webhook URL には、デプロイ先の `https://.../webhook` を設定してください。
 # DKIS マルチPC開発ガイド（USB持ち運び運用）
 
 このプロジェクトを USB メモリで持ち運びつつ、**このPC**と**別PC**の両方で安全に開発するための手順です。  
