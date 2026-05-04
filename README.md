@@ -40,6 +40,9 @@ uv sync
 uv run gunicorn --bind "127.0.0.1:5000" --workers 1 'line_bot_app.app:create_app()' --factory
 ```
 
+**開発用コンソール（LINE と同じ応答経路）**  
+Webhook を立てずに `AIResponder.reply` を試すときは `uv run python dev_console.py`。複数バブルになる長文は `split_line_text` どおりに区切って表示します。**本番デプロイ前に `dev_console.py` は削除する想定**です。
+
 ## 本番デプロイ（Render.com・Blueprint）
 
 1. このリポジトリを GitHub に push する。
