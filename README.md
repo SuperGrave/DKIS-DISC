@@ -2,13 +2,26 @@
 
 LINE Bot 専用の軽量 Flask アプリです。Web フロントエンド、SSE、音声合成、メディア再生、ローカルファイル操作は含めません。
 
+## 機能概要
+
+- OpenAI が DKIS 形式の `[COMMAND]` / `[ARGS]` / `[ARGS-2]` を出力し、`SEARCH`・`NEWS`・`WEATHER`・`READ-PAGE` は **RETRY（2段目のモデル呼び出し）** で結果を取り込んでから最終返答します。
+- **SEARCH**: Google Custom Search API（`GOOGLE_API_KEY` + `GOOGLE_CX` が必要）
+- **NEWS**: Google News RSS（キー不要）
+- **WEATHER**: Open-Meteo（ジオコーディング + 予報、キー不要。「現在地」は `DEFAULT_WEATHER_LOCATION` にフォールバック）
+- **READ-PAGE**: `trafilatura` で URL 本文抽出 →（既定では）要約して RETRY
+
 ## Environment Variables
 
 - `LINE_CHANNEL_SECRET`
 - `LINE_CHANNEL_ACCESS_TOKEN`
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`（任意、既定: `gpt-4.1-mini`）
-- `DKIS_SYSTEM_PROMPT`（任意）
+- `OPENAI_SUMMARY_MODEL`（任意。検索・ニュース・ページの中間要約に使用）
+- `DKIS_SYSTEM_PROMPT`（任意。**未設定時はコマンド仕様込みの既定プロンプト**）
+- `GOOGLE_API_KEY` / `GOOGLE_CX`（任意、`SEARCH` 用）
+- `GOOGLE_SEARCH_NUM`, `NEWS_MAX_ITEMS`, `SEARCH_USE_RAW_RESULT`, `NEWS_USE_RAW_RESULT`, `WEBPAGE_USE_RAW_RESULT`
+- `DEFAULT_WEATHER_LOCATION`（既定: `東京`）
+- `MAX_RETRY_CHAIN`, `MAX_HISTORY_TURNS`
 - `PORT`（任意、既定: `5000`）
 
 ## Run Locally

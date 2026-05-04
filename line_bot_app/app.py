@@ -19,7 +19,7 @@ def create_app() -> Flask:
     app = Flask(__name__)
     handler = WebhookHandler(config.line_channel_secret)
     line_configuration = Configuration(access_token=config.line_channel_access_token)
-    ai_responder = AIResponder(config)
+    brain = AIResponder(config)
 
     @app.get("/")
     def health_check():
@@ -40,9 +40,10 @@ def create_app() -> Flask:
     @handler.add(MessageEvent, message=TextMessageContent)
     def handle_text_message(event: MessageEvent):
         user_text = event.message.text
+        uid = getattr(event.source, "user_id", None) or "anonymous"
 
         try:
-            reply_text = ai_responder.generate_reply(user_text)
+            reply_text = brain.reply(uid, user_text)
         except Exception:
             app.logger.exception("OpenAI reply generation failed")
             reply_text = "すみません、今ちょっと返答に失敗しました。少し時間を置いてもう一度話しかけてください。"
