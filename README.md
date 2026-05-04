@@ -27,6 +27,8 @@ LINE 上で動作する **DKIS 互換の軽量 AI ボット**です。Flask の 
 
 ## ローカル開発
 
+リポジトリ直下の **`.python-version`** で **Python 3.12** に固定しています（`uv sync` が自動でその版を使います）。別版にしたい場合は `uv python pin <版>`。
+
 ```bash
 uv sync
 cp .env.example .env   # 値を編集
@@ -42,7 +44,7 @@ uv run gunicorn --bind "127.0.0.1:5000" --workers 1 'line_bot_app.app:create_app
 
 **開発用コンソール（LINE と同じ応答経路）**  
 Webhook を立てずに `AIResponder.reply` を試すときは `uv run python dev_console.py`。複数バブルになる長文は `split_line_text` どおりに区切って表示します。**本番デプロイ前に `dev_console.py` は削除する想定**です。  
-（LINE Bot SDK は Python 3.14 では Pydantic 関連の警告や import の重さが出やすいので、**3.12〜3.13 推奨**。本番は `render.yaml` の `pythonVersion` に合わせてください。）
+（`.python-version` で 3.12 に揃えている想定。別版で動かす場合は LINE Bot SDK と Python の組み合わせに注意。）
 
 ## 本番デプロイ（Render.com・Blueprint）
 
@@ -75,7 +77,7 @@ Webhook を立てずに `AIResponder.reply` を試すときは `uv run python de
 
 ### 必須ツール
 - Git
-- Python 3.10以上（推奨: 3.14系）
+- Python 3.12以上（このリポジトリは `.python-version` で 3.12 を既定）
 - uv
 
 ### uv の確認
