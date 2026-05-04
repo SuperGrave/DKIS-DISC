@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -15,6 +16,7 @@ from line_bot_app.line_messages import split_line_text
 
 # LINE 上の user_id に相当（履歴はこの ID で区切られる）
 _CONSOLE_USER_ID = "console-dev"
+_PROJECT_ROOT = Path(__file__).resolve().parent
 
 
 def main() -> None:
@@ -24,8 +26,17 @@ def main() -> None:
         except Exception:
             pass
 
-    load_dotenv()
-    config = load_config()
+    load_dotenv(_PROJECT_ROOT / ".env")
+    try:
+        config = load_config()
+    except RuntimeError as exc:
+        print(exc)
+        print()
+        print("対処:")
+        print(f"  1. 次のフォルダで実行しているか確認（ここに pyproject.toml と .env がある想定）:")
+        print(f"     {_PROJECT_ROOT}")
+        print("  2. .env が無い場合: .env.example をコピーし、LINE_* と OPENAI_API_KEY を埋める。")
+        sys.exit(1)
     brain = AIResponder(config)
 
     print("DKIS-LL 開発コンソール（LINE と同じ応答生成経路）")

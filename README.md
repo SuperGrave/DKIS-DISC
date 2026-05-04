@@ -2,6 +2,10 @@
 
 LINE 上で動作する **DKIS 互換の軽量 AI ボット**です。Flask の Webhook と OpenAI、`dist/settings.json` で定義されたツール（検索・ニュース・天気・ページ読込）を組み合わせます。**Web フロント・SSE・音声・メディア再生・ローカルファイル操作は含みません。**
 
+## 作業ディレクトリ（よくあるエラー対策）
+
+`pyproject.toml` と `.venv` は **`DKIS` フォルダ直下**にあります。親フォルダ（例: `DKIS-LINE`）だけ開いている場合は、ターミナルで **`cd DKIS`** してから `uv sync` / `uv run` を実行してください。`.env` も **`DKIS` 直下**に置き、`LINE_CHANNEL_SECRET`・`LINE_CHANNEL_ACCESS_TOKEN`・`OPENAI_API_KEY` を設定してください（`.env.example` をコピー）。
+
 ## 機能概要
 
 - **`dist/settings.json`**: メインシステムプロンプト、`ai_models.main`（OpenAI モデル名）、`control.max_retries` / `control.max_history`（リトライ上限・会話履歴ターン数）、検索件数・ニュース件数・入力フォーマット（`input_format.main`）を定義します。
