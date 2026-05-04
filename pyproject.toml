@@ -1,6 +1,6 @@
 [project]
 name = "dkis-line"
-version = "0.3.0"
+version = "0.4.0"
 description = "DKIS-LINE - LINE Bot専用の軽量AIチャットアプリ"
 readme = "README.md"
 requires-python = ">=3.10"

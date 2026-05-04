@@ -1,25 +1,20 @@
-"""SEARCH / NEWS / WEATHER / READ-PAGE / SPEAK などコマンド実装（音声なし）。"""
+"""SEARCH / NEWS / WEATHER / READ-PAGE / SPEAK（ツール結果は要約せずそのまま RI へ）。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
 
-from openai import OpenAI
-
 from .config import AppConfig
 from .google_cse import google_custom_search
 from .news_rss import google_news_search
 from .scrape_page import resolve_news_redirect, scrape_webpage
-from .summaries import summarize_news_results, summarize_search_results, summarize_webpage
-from .weather_openmeteo import weather_for_place
+from .weather_openmeteo import fetch_weather_report
 
 
 @dataclass
 class CommandServices:
     config: AppConfig
-    client: OpenAI
-    last_user_input: str = ""
 
 
 def cmd_speak(_svc: CommandServices, _args: dict, TEXT: str, NOTE: str | None = None):
@@ -28,20 +23,19 @@ def cmd_speak(_svc: CommandServices, _args: dict, TEXT: str, NOTE: str | None = 
 
 def cmd_save_log(_svc: CommandServices, _args: dict, TEXT: str, NOTE: str | None = None):
     return (
-        TEXT or "クラウド版では会話ファイルへの保存はできませんが、必要な内容はこのチャットでお伝えします。",
-        "SAVE-LOG は無効（ホスト保存なし）",
+        TEXT or "クラウド版では会話ログのファイル保存は行えません。",
+        "SAVE-LOG は無効",
     )
 
 
 def cmd_search(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None):
     query = args.get("query", "").strip() if isinstance(args, dict) else ""
     if not query:
-        return (TEXT or "").strip(), "SEARCH: query なし", "検索語が空です。もう一度お願いします。", None, None
+        return (TEXT or "").strip(), "SEARCH: query なし", "検索語が空です。", None, None
 
     if not svc.config.google_api_key or not svc.config.google_cx:
         msg = (
-            "検索機能を使うには、サーバーに GOOGLE_API_KEY と GOOGLE_CX（Programmable Search の CX）"
-            "が設定されている必要があります。"
+            "検索を使うにはサーバーに GOOGLE_API_KEY と GOOGLE_CX（Programmable Search の CX）が必要です。"
         )
         return (TEXT or "").strip(), "SEARCH: API 未設定", msg, None, None
 
@@ -53,21 +47,8 @@ def cmd_search(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = N
             pass
 
     blob = google_custom_search(svc.config.google_api_key, svc.config.google_cx, query, num=num)
-    note = NOTE or args.get("note", "") if isinstance(args, dict) else ""
-
-    if svc.config.search_use_raw_result:
-        summary = blob
-    else:
-        summary = summarize_search_results(
-            svc.client,
-            svc.config.summary_model,
-            query,
-            note,
-            blob,
-        )
-
     dmis_log = f"Google検索「{query}」"
-    return TEXT or "", dmis_log, summary, blob, None
+    return TEXT or "", dmis_log, blob, blob, None
 
 
 def cmd_news(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None):
@@ -88,15 +69,8 @@ def cmd_news(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = Non
             pass
 
     blob = google_news_search(query, location=location or None, time_filter=time_filter, max_items=max_items)
-    note = NOTE or args.get("note", "") if isinstance(args, dict) else ""
-
-    if svc.config.news_use_raw_result:
-        summary = blob
-    else:
-        summary = summarize_news_results(svc.client, svc.config.summary_model, query, note, blob)
-
     dmis_log = f"ニュース検索「{query}」"
-    return TEXT or "", dmis_log, summary, blob, None
+    return TEXT or "", dmis_log, blob, blob, None
 
 
 def cmd_weather(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None):
@@ -104,8 +78,16 @@ def cmd_weather(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = 
     if isinstance(args, dict):
         place = (args.get("w_location") or "").strip()
 
-    blob = weather_for_place(place, default_place=svc.config.default_weather_location)
-    dmis_log = f"天気: {place or '（既定地点）'}"
+    gps_aliases = ("現在地", "いまの場所", "ここ", "current", "here")
+    if place.lower() in {x.lower() for x in gps_aliases}:
+        place = ""
+
+    if not place:
+        msg = "(困) どこの天気が知りたいか、地名を教えてください、マスター。"
+        return msg, "WEATHER: 地名なし", msg, {"__suppress_followup_retry__": True}, None
+
+    blob = fetch_weather_report(place, timeout=svc.config.weather_api_timeout)
+    dmis_log = f"天気: {place}"
     return TEXT or "", dmis_log, blob, blob, None
 
 
@@ -125,16 +107,8 @@ def cmd_read_page(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None 
     if raw_text.startswith("エラー:") or raw_text.startswith("本文が抽出できませんでした"):
         return TEXT or "", f"READ-PAGE 失敗: {target}", raw_text, raw_text, None
 
-    note = NOTE or args.get("note", "") if isinstance(args, dict) else ""
-    user_q = svc.last_user_input or ""
-
-    if svc.config.webpage_use_raw_result:
-        summary = raw_text
-    else:
-        summary = summarize_webpage(svc.client, svc.config.summary_model, target, user_q, note, raw_text)
-
     dmis_log = f"READ-PAGE: {target}"
-    return TEXT or "", dmis_log, summary, raw_text, None
+    return TEXT or "", dmis_log, raw_text, raw_text, None
 
 
 COMMAND_HANDLERS: dict[str, Any] = {

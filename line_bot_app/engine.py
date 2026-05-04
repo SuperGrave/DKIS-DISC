@@ -16,7 +16,7 @@ class LineBrain:
     def __init__(self, config: AppConfig):
         self._config = config
         self._client = OpenAI(api_key=config.openai_api_key)
-        self._svc = CommandServices(config=config, client=self._client)
+        self._svc = CommandServices(config=config)
         self._histories: dict[str, list[dict]] = defaultdict(list)
         self._last_proc_by_user: dict[str, str] = {}
 
@@ -78,12 +78,16 @@ class LineBrain:
             return "すみません、メッセージが空みたいです。もう一度送ってください。"
 
         uid = user_id or "anonymous"
-        self._svc.last_user_input = text
 
         messages = self._ensure_session(uid)
         lp = self._last_proc_by_user.get(uid, "（前回処理なし）")
 
-        payload = build_input_segments(text, is_retry=False, last_proc_result=lp)
+        payload = build_input_segments(
+            text,
+            is_retry=False,
+            last_proc_result=lp,
+            input_main=self._config.input_main,
+        )
         formatted = payload["text"]
         messages.append({"role": "user", "content": formatted})
         self._trim(messages)
@@ -102,7 +106,10 @@ class LineBrain:
             ri_text = summary or TEXT or ""
             lp_now = self._last_proc_by_user.get(uid, lp)
             retry_payload = build_input_segments(
-                ri_text, is_retry=True, last_proc_result=lp_now
+                ri_text,
+                is_retry=True,
+                last_proc_result=lp_now,
+                input_main=self._config.input_main,
             )
             retry_formatted = retry_payload["text"]
 

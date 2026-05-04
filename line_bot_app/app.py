@@ -23,7 +23,7 @@ def create_app() -> Flask:
 
     @app.get("/")
     def health_check():
-        return {"ok": True, "service": "dkis-line-bot"}
+        return {"ok": True, "service": "dkis-line-bot", "settings": config.settings_source}
 
     @app.post("/webhook")
     def webhook():

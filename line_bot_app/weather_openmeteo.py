@@ -113,15 +113,11 @@ def format_weather_text(data: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-def weather_for_place(place: str, *, default_place: str, timeout: float = 12.0) -> str:
-    """
-    地名または「現在地」相当のフォールバックで天気テキストを返す。
-    LINE では GPS が無いため「現在地」は default_place に読み替える。
-    """
+def fetch_weather_report(place: str, *, timeout: float = 12.0) -> str:
+    """地名から Open-Meteo で天気テキストを返す（place は空でないことが前提）。"""
     raw = (place or "").strip()
-    current_aliases = ("現在地", "いまの場所", "ここ", "current", "here")
-    if not raw or raw.lower() in current_aliases:
-        raw = default_place
+    if not raw:
+        return "内部エラー: 地名が空です。"
 
     geo = geocode_place(raw, timeout=timeout)
     if not geo:

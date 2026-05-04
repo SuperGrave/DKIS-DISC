@@ -33,7 +33,6 @@ tts_cache/
 *.tmp
 
 # === ユーザー設定・ログ（dist内） ===
-dist/settings.json
 dist/テキストログ/
 dist/メディアファイル/
 

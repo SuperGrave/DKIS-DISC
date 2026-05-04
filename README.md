@@ -4,24 +4,20 @@ LINE Bot 専用の軽量 Flask アプリです。Web フロントエンド、SSE
 
 ## 機能概要
 
-- OpenAI が DKIS 形式の `[COMMAND]` / `[ARGS]` / `[ARGS-2]` を出力し、`SEARCH`・`NEWS`・`WEATHER`・`READ-PAGE` は **RETRY（2段目のモデル呼び出し）** で結果を取り込んでから最終返答します。
+- **`dist/settings.json`**: メインシステムプロンプト、`ai_models.main`（OpenAI モデル名）、`control.max_retries` / `control.max_history`（リトライ上限・会話履歴ターン数）、検索件数・ニュース件数・入力フォーマット（`input_format.main`）を定義します。
+- OpenAI は DKIS 形式の `[CMD]` / `[ARGS]` / `[ARGS-2]` を出力します。`SEARCH`・`NEWS`・`WEATHER`・`READ-PAGE` は **ツールの生結果を RI にそのまま載せて** 2 段目のモデル呼び出しへ進みます（中間要約用の別モデル呼び出しはありません）。
 - **SEARCH**: Google Custom Search API（`GOOGLE_API_KEY` + `GOOGLE_CX` が必要）
 - **NEWS**: Google News RSS（キー不要）
-- **WEATHER**: Open-Meteo（ジオコーディング + 予報、キー不要。「現在地」は `DEFAULT_WEATHER_LOCATION` にフォールバック）
-- **READ-PAGE**: `trafilatura` で URL 本文抽出 →（既定では）要約して RETRY
+- **WEATHER**: Open-Meteo。**`w_location` が空や GPS 相当語のときは実行せず地名を聞き返す**（現在地フォールバックなし）
+- **READ-PAGE**: `trafilatura` で本文抽出し、そのテキストをそのまま RI へ
 
 ## Environment Variables
 
 - `LINE_CHANNEL_SECRET`
 - `LINE_CHANNEL_ACCESS_TOKEN`
 - `OPENAI_API_KEY`
-- `OPENAI_MODEL`（任意、既定: `gpt-4.1-mini`）
-- `OPENAI_SUMMARY_MODEL`（任意。検索・ニュース・ページの中間要約に使用）
-- `DKIS_SYSTEM_PROMPT`（任意。**未設定時はコマンド仕様込みの既定プロンプト**）
+- `DKIS_SETTINGS_PATH`（任意・既定はリポジトリ内の `dist/settings.json`）
 - `GOOGLE_API_KEY` / `GOOGLE_CX`（任意、`SEARCH` 用）
-- `GOOGLE_SEARCH_NUM`, `NEWS_MAX_ITEMS`, `SEARCH_USE_RAW_RESULT`, `NEWS_USE_RAW_RESULT`, `WEBPAGE_USE_RAW_RESULT`
-- `DEFAULT_WEATHER_LOCATION`（既定: `東京`）
-- `MAX_RETRY_CHAIN`, `MAX_HISTORY_TURNS`
 - `PORT`（任意、既定: `5000`）
 
 ## Run Locally
