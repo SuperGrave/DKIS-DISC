@@ -5,7 +5,7 @@ services:
   - type: web
     name: dkis-line-bot
     runtime: python
-    pythonVersion: "3.12"
+    # Python 版は Blueprint では指定不可。ルートの .python-version（3.12）を参照する。
     plan: free
     region: singapore
     buildCommand: curl -LsSf https://astral.sh/uv/install.sh | sh && export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH" && uv sync
