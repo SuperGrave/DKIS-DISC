@@ -38,6 +38,27 @@ def resolve_settings_path() -> Path:
     return (Path(__file__).resolve().parent.parent / "dist" / "settings.json").resolve()
 
 
+def _load_system_prompt_main(system_prompts: dict, settings_path: Path) -> str:
+    """main_file（settings と同じディレクトリを基準とする相対パス）を優先。無ければ main（JSON 内文字列）。"""
+    base = settings_path.parent
+    main_file = str(system_prompts.get("main_file") or "").strip()
+    inline = str(system_prompts.get("main") or "").strip()
+
+    if main_file:
+        file_path = (base / main_file).resolve()
+        if not file_path.is_file():
+            raise RuntimeError(
+                f"system_prompts.main_file が見つかりません: {file_path} "
+                f"（settings.json と同じフォルダを基準にしています）"
+            )
+        text = file_path.read_text(encoding="utf-8").strip()
+        if not text:
+            raise RuntimeError(f"システムプロンプトファイルが空です: {file_path}")
+        return text
+
+    return inline
+
+
 def load_json_settings() -> JsonSettings:
     path = resolve_settings_path()
     if not path.is_file():
@@ -74,13 +95,19 @@ def load_json_settings() -> JsonSettings:
         nl_static=nl_static,
     )
 
+    prompt_main = _load_system_prompt_main(system_prompts, path).strip()
+    if not prompt_main:
+        prompt_main = (
+            "システムプロンプトが空です。"
+            "dist/settings.json の system_prompts.main_file または main を確認してください。"
+        )
+
     return JsonSettings(
         path=path,
-        system_prompt_main=str(system_prompts.get("main") or "").strip()
-        or "システムプロンプト（system_prompts.main）が空です。dist/settings.json を確認してください。",
+        system_prompt_main=prompt_main,
         openai_model=str(ai_models.get("main") or "gpt-4.1-mini"),
-        max_retry_chain=max(1, int(control.get("max_retries", 5))),
-        max_history_turns=max(1, int(control.get("max_history", 8))),
+        max_retry_chain=max(1, int(control.get("max_retries", 10))),
+        max_history_turns=max(1, int(control.get("max_history", 10))),
         google_search_num=max(1, min(10, int(search.get("result_count", 5)))),
         news_max_items=max(1, min(50, int(news.get("max_items", 10)))),
         weather_api_timeout=float(weather.get("api_timeout", 12)),
