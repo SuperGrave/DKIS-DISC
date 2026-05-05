@@ -13,7 +13,7 @@ LINE 上で動作する **DKIS 互換の軽量 AI ボット**です。Flask の 
 - **`dist/settings.json`**: モデル名（`ai_models.main`）、**リトライ上限**（`control.max_retries`）、**履歴ターン**（`control.max_history`）、検索・ニュース・天気・入力フォーマットなど。
 - **`dist/system_prompt_main.txt`**: メインシステムプロンプト本体（**Markdown 見出し・コードフェンス**で記述。拡張子は `.txt` のまま）。`settings.json` の `system_prompts.main_file` でパスを指定。
 - OpenAI は DKIS 形式の `[CMD]` / `[ARGS]` / `[ARGS-2]` を出力します。`SEARCH`・`NEWS`・`WEATHER`・`READ-PAGE` は **ツールの生結果を RI にそのまま載せて** 2 段目のモデル呼び出しへ進みます（中間要約用の別モデル呼び出しはありません）。
-- **`[ARGS-2].retry: true` の連鎖**では、ユーザーへは **複数バブル**で順に送ります: そのターンの `[TEXT]`（例: 「調べますね」）→ **`[RT#n]コマンド:引数要約 tt=トークン数`**（OpenAI `usage` に基づく）→ … → 最終の `[TEXT]` → **`[RT]計 n 回`**（ツール続行の回数）。**LINE の 1 リプライあたりテキストメッセージは最大 5 件**のため、それを超える場合は `flatten_reply_parts` が先頭から詰めます。
+- **`[ARGS-2].retry: true` の連鎖**では、中間の `[TEXT]`（例: 「もう少し調べますね」）や **`[RT#n]コマンド:引数 tt=…`**、最終 `[TEXT]`、**`[RT]計 n 回`** を **処理の進行に合わせて逐次**送ります（通常は **最初の1バブルだけ `reply_message`**、続きは **`push_message`（ユーザー ID 宛）**）。長いパートは `split_line_text` で分割します。`user_id` が取れない異常系では従来どおり 1 回の `reply` にまとめます。送信上限は LINE のプランに依存します。
 - **SEARCH**: Google Custom Search API（`GOOGLE_API_KEY` + `GOOGLE_CX` が必要）
 - **NEWS**: Google News RSS（キー不要）
 - **WEATHER**: Open-Meteo。**`w_location` が空や GPS 相当語のときは実行せず地名を聞き返す**（現在地フォールバックなし）
@@ -55,7 +55,7 @@ uv run gunicorn --bind "127.0.0.1:5000" --workers 1 'line_bot_app.app:create_app
 ```
 
 **開発用コンソール（LINE と同じ応答経路）**  
-Webhook を立てずに `AIResponder.reply` を試すときは `uv run python dev_console.py`。**このときは `.env` に `OPENAI_API_KEY` だけあれば足ります**（LINE のシークレット／トークンは不要）。複数バブルになる長文は `split_line_text` どおりに区切って表示します。**本番デプロイ前に `dev_console.py` は削除する想定**です。  
+Webhook を立てずに `AIResponder.reply` を試すときは `uv run python dev_console.py`。**このときは `.env` に `OPENAI_API_KEY` だけあれば足ります**（LINE のシークレット／トークンは不要）。リトライ連鎖では **LINE と同様にメッセージを逐次表示**します（長文は `split_line_text` で分割）。**本番デプロイ前に `dev_console.py` は削除する想定**です。  
 （`.python-version` で 3.12 に揃えている想定。別版で動かす場合は LINE Bot SDK と Python の組み合わせに注意。）
 
 ## 本番デプロイ（Render.com・Blueprint）

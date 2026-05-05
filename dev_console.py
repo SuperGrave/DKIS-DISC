@@ -12,7 +12,6 @@ from dotenv import load_dotenv
 
 from line_bot_app.ai import AIResponder
 from line_bot_app.config import load_config
-from line_bot_app.line_messages import flatten_reply_parts
 
 # LINE 上の user_id に相当（履歴はこの ID で区切られる）
 _CONSOLE_USER_ID = "console-dev"
@@ -57,16 +56,17 @@ def main() -> None:
             break
 
         try:
-            reply_parts = brain.reply(_CONSOLE_USER_ID, line)
+            first_bubble = True
+
+            def on_line(text: str) -> None:
+                nonlocal first_bubble
+                prefix = "ボット> " if first_bubble else "      … "
+                first_bubble = False
+                print(f"{prefix}{text}")
+
+            brain.reply(_CONSOLE_USER_ID, line, on_line_message=on_line)
         except Exception as exc:
             print(f"ボット> （エラー）{exc}")
-            print()
-            continue
-
-        chunks = flatten_reply_parts(reply_parts)
-        for i, chunk in enumerate(chunks):
-            prefix = "ボット> " if i == 0 else "      … "
-            print(f"{prefix}{chunk}")
         print()
 
 

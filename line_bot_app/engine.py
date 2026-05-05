@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
 
 from openai import OpenAI
 
 from .commands import COMMAND_HANDLERS, CommandServices
 from .config import AppConfig
 from .input_build import build_input_segments
+from .line_messages import split_line_text
 from .parsing import parse_ai_response
 
 
@@ -52,6 +54,18 @@ def _rt_arg_summary(command: str, args: object) -> str:
         u = str(args.get("url") or "").strip()
         return (u[:120] + "…") if len(u) > 120 else (u or "(urlなし)")
     return "-"
+
+
+def _emit_chunks(on_line_message: Callable[[str], None] | None, part: str, *, out_parts: list[str]) -> None:
+    """論理パートを out_parts に積み、指定があれば分割済みチャンクをその場でコールバックする。"""
+    p = (part or "").strip()
+    if not p:
+        return
+    out_parts.append(p)
+    if not on_line_message:
+        return
+    for chunk in split_line_text(p):
+        on_line_message(chunk)
 
 
 class LineBrain:
@@ -115,11 +129,22 @@ class LineBrain:
 
         return TEXT_out, should_retry, dmis_log, summary, raw_result, summary_token_usage
 
-    def reply(self, user_id: str, user_text: str) -> list[str]:
-        """ユーザーへの送信パートの並び（中間の [TEXT]・[RT#…]・最終応答）。"""
+    def reply(
+        self,
+        user_id: str,
+        user_text: str,
+        *,
+        on_line_message: Callable[[str], None] | None = None,
+    ) -> list[str]:
+        """ユーザーへの送信パートの並び。`on_line_message` があるときは各パートを確定次第コールバック（LINE 逐次送信用）。"""
         text = (user_text or "").strip()
         if not text:
-            return ["すみません、メッセージが空みたいです。もう一度送ってください。"]
+            msg = "すみません、メッセージが空みたいです。もう一度送ってください。"
+            empty_parts: list[str] = [msg]
+            if on_line_message:
+                for chunk in split_line_text(msg):
+                    on_line_message(chunk)
+            return empty_parts
 
         uid = user_id or "anonymous"
 
@@ -149,11 +174,11 @@ class LineBrain:
 
         while should_retry and retry_round < self._config.max_retry_chain:
             retry_round += 1
-            if (TEXT or "").strip():
-                out_parts.append(TEXT.strip())
+            _emit_chunks(on_line_message, TEXT, out_parts=out_parts)
             cmd = (parsed.get("CMD") or "SPEAK").strip().upper()
             detail = _rt_arg_summary(cmd, parsed.get("ARGS"))
-            out_parts.append(f"[RT#{retry_round}]{cmd}:{detail} {_usage_suffix(usage)}")
+            rt_line = f"[RT#{retry_round}]{cmd}:{detail} {_usage_suffix(usage)}"
+            _emit_chunks(on_line_message, rt_line, out_parts=out_parts)
 
             ri_text = summary or TEXT or ""
             lp_now = self._last_proc_by_user.get(uid, lp)
@@ -183,9 +208,17 @@ class LineBrain:
 
         final_text = (TEXT or "").strip()
         if final_text:
-            out_parts.append(final_text)
+            _emit_chunks(on_line_message, final_text, out_parts=out_parts)
 
         if retry_round > 0:
-            out_parts.append(f"[RT]計 {retry_round} 回")
+            summary_line = f"[RT]計 {retry_round} 回"
+            _emit_chunks(on_line_message, summary_line, out_parts=out_parts)
 
-        return out_parts or ["すみません、うまく返答を組み立てられませんでした。"]
+        fallback = "すみません、うまく返答を組み立てられませんでした。"
+        if not out_parts:
+            if on_line_message:
+                for chunk in split_line_text(fallback):
+                    on_line_message(chunk)
+            return [fallback]
+
+        return out_parts
