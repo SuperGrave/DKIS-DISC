@@ -9,7 +9,7 @@ from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
 from .ai import AIResponder
 from .config import load_config
-from .line_messages import split_line_text
+from .line_messages import flatten_reply_parts
 
 
 def create_app() -> Flask:
@@ -43,12 +43,14 @@ def create_app() -> Flask:
         uid = getattr(event.source, "user_id", None) or "anonymous"
 
         try:
-            reply_text = brain.reply(uid, user_text)
+            reply_parts = brain.reply(uid, user_text)
         except Exception:
             app.logger.exception("OpenAI reply generation failed")
-            reply_text = "すみません、今ちょっと返答に失敗しました。少し時間を置いてもう一度話しかけてください。"
+            reply_parts = [
+                "すみません、今ちょっと返答に失敗しました。少し時間を置いてもう一度話しかけてください。"
+            ]
 
-        messages = [TextMessage(text=chunk) for chunk in split_line_text(reply_text)]
+        messages = [TextMessage(text=chunk) for chunk in flatten_reply_parts(reply_parts)]
         with ApiClient(line_configuration) as api_client:
             MessagingApi(api_client).reply_message(
                 ReplyMessageRequest(
