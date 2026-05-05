@@ -1,4 +1,4 @@
-"""DKIS 互換の入力整形（UI:/RI: と LP: の付与）。labels / NL は settings.json 由来。"""
+"""DKIS 互換の入力整形（UI:/RI: と LP: の付与）。labels は settings.json 由来。"""
 
 from __future__ import annotations
 

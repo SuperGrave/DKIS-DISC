@@ -26,17 +26,15 @@
       "mode": "all",
       "include": {
         "last_result": true,
-        "location": true,
+        "location": false,
         "time": true
       },
       "labels": {
         "user": "UI：",
         "retry": "RI：",
         "last_result": "LP：",
-        "location": "NL：",
         "time": "NT："
-      },
-      "nl_static": "LINEのためサーバーはGPSや現在地を取得できません。天気は WEATHER の w_location にマスターの発話または文脈から特定した具体的地名を必ず入れてください。地名が断定できないときは WEATHER を実行せず SPEAK で地名を確認してください。なお RI には検索・ニュース・ページ本文・天気テキストなどツールの生結果がそのまま渡ります。"
+      }
     }
   }
 }
