@@ -1,4 +1,5 @@
 # Render Blueprint — https://render.com/docs/blueprint-spec
+# Python + uv.lock があるサービスでは Render が uv を用意するので、curl での再インストールはしない。
 # シークレットは Dashboard の Environment で設定（sync: false）。
 
 services:
@@ -8,8 +9,8 @@ services:
     # Python 版は Blueprint では指定不可。ルートの .python-version（3.12）を参照する。
     plan: free
     region: singapore
-    buildCommand: curl -LsSf https://astral.sh/uv/install.sh | sh && export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH" && uv sync
-    startCommand: export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH" && uv run gunicorn --bind 0.0.0.0:$PORT --workers 1 'line_bot_app.app:create_app()' --factory
+    buildCommand: uv sync
+    startCommand: uv run gunicorn --bind 0.0.0.0:$PORT --workers 1 'line_bot_app.app:create_app()' --factory
     envVars:
       - key: LINE_CHANNEL_SECRET
         sync: false
