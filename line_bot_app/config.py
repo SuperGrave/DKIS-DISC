@@ -23,11 +23,21 @@ class AppConfig:
 
 
 _DEV_CONSOLE_LINE_PLACEHOLDER = "unused-dev-console"
+_OPENAI_PLACEHOLDER = "unused-openai-not-configured"
 
 
-def load_config(*, require_line_credentials: bool = True) -> AppConfig:
-    """Webhook 起動時は LINE の必須変数もチェックする。開発コンソールだけ試すときは False にできる。"""
-    missing = [name for name in ("OPENAI_API_KEY",) if not (os.environ.get(name) or "").strip()]
+def load_config(
+    *, require_line_credentials: bool = True, require_openai: bool = True
+) -> AppConfig:
+    """Webhook 起動時は LINE の必須変数もチェックする。開発コンソールだけ試すときは False にできる。
+    Render 初回デプロイで ENV が空のときは require_* を False にしプレースホルダで起動できる。"""
+    missing: list[str] = []
+    if require_openai:
+        missing.extend(
+            name
+            for name in ("OPENAI_API_KEY",)
+            if not (os.environ.get(name) or "").strip()
+        )
     if require_line_credentials:
         missing.extend(
             name
@@ -46,10 +56,14 @@ def load_config(*, require_line_credentials: bool = True) -> AppConfig:
         line_secret = line_secret or _DEV_CONSOLE_LINE_PLACEHOLDER
         line_token = line_token or _DEV_CONSOLE_LINE_PLACEHOLDER
 
+    openai_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
+    if not openai_key and not require_openai:
+        openai_key = _OPENAI_PLACEHOLDER
+
     return AppConfig(
         line_channel_secret=line_secret,
         line_channel_access_token=line_token,
-        openai_api_key=(os.environ.get("OPENAI_API_KEY") or "").strip(),
+        openai_api_key=openai_key,
         settings_source=str(js.path),
         system_prompt=js.system_prompt_main,
         openai_model=js.openai_model,

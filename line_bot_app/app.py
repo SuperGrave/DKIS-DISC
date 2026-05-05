@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from dotenv import load_dotenv
 from flask import Flask, abort, request
 from linebot.v3 import WebhookHandler
@@ -21,7 +23,15 @@ from .line_messages import flatten_reply_parts
 
 def create_app() -> Flask:
     load_dotenv()
-    config = load_config()
+    line_ready = bool(
+        (os.environ.get("LINE_CHANNEL_SECRET") or "").strip()
+        and (os.environ.get("LINE_CHANNEL_ACCESS_TOKEN") or "").strip()
+    )
+    openai_ready = bool((os.environ.get("OPENAI_API_KEY") or "").strip())
+    config = load_config(
+        require_line_credentials=line_ready,
+        require_openai=openai_ready,
+    )
 
     app = Flask(__name__)
     handler = WebhookHandler(config.line_channel_secret)
@@ -30,7 +40,12 @@ def create_app() -> Flask:
 
     @app.get("/")
     def health_check():
-        return {"ok": True, "service": "dkis-ll-bot", "settings": config.settings_source}
+        return {
+            "ok": True,
+            "service": "dkis-ll-bot",
+            "settings": config.settings_source,
+            "credentials_ready": {"line": line_ready, "openai": openai_ready},
+        }
 
     @app.post("/webhook")
     def webhook():
