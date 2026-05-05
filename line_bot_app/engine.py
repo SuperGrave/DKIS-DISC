@@ -210,10 +210,6 @@ class LineBrain:
         if final_text:
             _emit_chunks(on_line_message, final_text, out_parts=out_parts)
 
-        if retry_round > 0:
-            summary_line = f"[RT]計 {retry_round} 回"
-            _emit_chunks(on_line_message, summary_line, out_parts=out_parts)
-
         fallback = "すみません、うまく返答を組み立てられませんでした。"
         if not out_parts:
             if on_line_message:
