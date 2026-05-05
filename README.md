@@ -11,7 +11,7 @@ LINE 上で動作する **DKIS 互換の軽量 AI ボット**です。Flask の 
 ## 機能概要
 
 - **`dist/settings.json`**: モデル名（`ai_models.main`）、**リトライ上限**（`control.max_retries`）、**履歴ターン**（`control.max_history`）、検索・ニュース・天気・入力フォーマットなど。
-- **`dist/system_prompt_main.txt`**: メインシステムプロンプト本体（読みやすい複数行）。`settings.json` の `system_prompts.main_file` でパスを指定（既定はこのファイル）。
+- **`dist/system_prompt_main.txt`**: メインシステムプロンプト本体（**Markdown 見出し・コードフェンス**で記述。拡張子は `.txt` のまま）。`settings.json` の `system_prompts.main_file` でパスを指定。
 - OpenAI は DKIS 形式の `[CMD]` / `[ARGS]` / `[ARGS-2]` を出力します。`SEARCH`・`NEWS`・`WEATHER`・`READ-PAGE` は **ツールの生結果を RI にそのまま載せて** 2 段目のモデル呼び出しへ進みます（中間要約用の別モデル呼び出しはありません）。
 - **`[ARGS-2].retry: true` の連鎖**では、ユーザーへは **複数バブル**で順に送ります: そのターンの `[TEXT]`（例: 「調べますね」）→ **`[RT#n]コマンド:引数要約 tt=トークン数`**（OpenAI `usage` に基づく）→ … → 最終の `[TEXT]` → **`[RT]計 n 回`**（ツール続行の回数）。**LINE の 1 リプライあたりテキストメッセージは最大 5 件**のため、それを超える場合は `flatten_reply_parts` が先頭から詰めます。
 - **SEARCH**: Google Custom Search API（`GOOGLE_API_KEY` + `GOOGLE_CX` が必要）
