@@ -10,7 +10,7 @@ LINE 上で動作する **DKIS 互換の軽量 AI ボット**です。Flask の 
 
 ## 機能概要
 
-- **`dist/settings.json`**: メインシステムプロンプト、`ai_models.main`（OpenAI モデル名）、`control.max_retries` / `control.max_history`（リトライ上限・会話履歴ターン数）、検索件数・ニュース件数・入力フォーマット（`input_format.main`）を定義します。
+- **`dist/settings.json`**: メインシステムプロンプト（`system_prompts.main`）、**利用モデル**（`ai_models.main`。既定でプロジェクトに合わせた名前が入っています）、`control.max_retries` / `control.max_history`（リトライ上限・会話履歴ターン数）、検索件数・ニュース件数・入力フォーマット（`input_format.main`）を定義します。
 - OpenAI は DKIS 形式の `[CMD]` / `[ARGS]` / `[ARGS-2]` を出力します。`SEARCH`・`NEWS`・`WEATHER`・`READ-PAGE` は **ツールの生結果を RI にそのまま載せて** 2 段目のモデル呼び出しへ進みます（中間要約用の別モデル呼び出しはありません）。
 - **SEARCH**: Google Custom Search API（`GOOGLE_API_KEY` + `GOOGLE_CX` が必要）
 - **NEWS**: Google News RSS（キー不要）
