@@ -4,7 +4,7 @@ LINE 上で動作する **DKIS 互換の軽量 AI ボット**です。Flask の 
 
 ## 作業ディレクトリ（よくあるエラー対策）
 
-`pyproject.toml` と `.venv` は **`DKIS` フォルダ直下**にあります。親フォルダ（例: `DKIS-LINE`）だけ開いている場合は、ターミナルで **`cd DKIS`** してから `uv sync` / `uv run` を実行してください。`.env` は **`DKIS` 直下**に置きます（テンプレートは **`.env.example`**）。
+`pyproject.toml` と `.venv` は **リポジトリ（例: `DKIS-LINE`）の直下**にあります。ターミナルでそのフォルダにいることを確認してから `uv sync` / `uv run` を実行してください。`.env` も **リポジトリ直下**に置きます（テンプレートは **`.env.example`**）。
 
 `.env` の書き方は **`変数名=値`** の1行で、**イコールの直後に値を貼り付ければそのまま動く**ことが多いです（値の前後にスペースは入れない／行末に余計な `"` は付けない）。
 
@@ -101,7 +101,7 @@ uv --version
 `.venv` は PC 依存なので、USBで共有しません。各PCで作り直します。
 
 ```powershell
-cd "D:\DKISシリーズパッケージ\DKIS"
+cd "D:\DKISシリーズパッケージ\DKIS-LINE"
 if (Test-Path ".venv") { Remove-Item -Recurse -Force ".venv" }
 uv venv
 uv sync
@@ -117,7 +117,7 @@ Copy-Item "config.example.py" "config.py"
 ## 2. 起動手順（どのPCでも共通）
 
 ```powershell
-cd "D:\DKISシリーズパッケージ\DKIS"
+cd "D:\DKISシリーズパッケージ\DKIS-LINE"
 uv sync
 uv run python main.py
 ```
@@ -137,7 +137,7 @@ git push -u origin HEAD
 
 ### B. 別PCでやること（作業再開時）
 ```powershell
-cd "D:\DKISシリーズパッケージ\DKIS"
+cd "D:\DKISシリーズパッケージ\DKIS-LINE"
 git fetch --all
 git checkout feature/xxx
 git pull
@@ -164,7 +164,7 @@ USBを別PCで使うと所有者SID不一致が発生することがあります
 そのPCでリポジトリ所有権を取り直してください。
 
 ```powershell
-takeown /F "D:\DKISシリーズパッケージ\DKIS" /R /D Y
+takeown /F "D:\DKISシリーズパッケージ\DKIS-LINE" /R /D Y
 ```
 
 その後に確認:
@@ -187,7 +187,7 @@ uv sync
 
 ## 6. 運用のコツ
 
-- USB内の作業フォルダは固定パスにする（例: `D:\DKISシリーズパッケージ\DKIS`）
+- USB内の作業フォルダは固定パスにする（例: `D:\DKISシリーズパッケージ\DKIS-LINE`）
 - 大きな変更前に必ずブランチ作成
 - PC切替前に必ず `commit` + `push`
 - 切替後は `pull` + `uv sync` を必ず実行
