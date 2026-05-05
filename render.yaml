@@ -10,7 +10,7 @@ services:
     plan: free
     region: singapore
     buildCommand: uv sync
-    startCommand: uv run gunicorn --bind 0.0.0.0:$PORT --workers 1 'line_bot_app.app:create_app()' --factory
+    startCommand: uv run gunicorn --bind 0.0.0.0:$PORT --workers 1 main:app
     envVars:
       - key: LINE_CHANNEL_SECRET
         sync: false
