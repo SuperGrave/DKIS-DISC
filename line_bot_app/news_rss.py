@@ -9,6 +9,17 @@ from xml.etree import ElementTree
 import requests
 
 
+_DEFAULT_HEADERS = {
+    # Google News RSS はデフォルトの Python UA でブロック・異常応答になりやすい。
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/rss+xml, application/xml, text/xml, text/html;q=0.9, */*;q=0.8",
+    "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+}
+
+
 def google_news_search(
     query: str,
     *,
@@ -23,9 +34,17 @@ def google_news_search(
     encoded = quote_plus(q)
     url = f"https://news.google.com/rss/search?q={encoded}&hl=ja&gl=JP&ceid=JP:ja"
     try:
-        r = requests.get(url, timeout=timeout)
+        r = requests.get(url, timeout=timeout, headers=_DEFAULT_HEADERS)
         r.raise_for_status()
-        root = ElementTree.fromstring(r.content)
+        body = r.content
+        head_snip = body[:1200].lstrip().lower()
+        if b"<rss" not in head_snip and not body.lstrip().startswith(b"<?xml"):
+            return (
+                "ニュース取得エラー: RSS形式ではない応答でした。"
+                "（データセンターからのアクセスが Google 側で制限されている可能性があります。"
+                "SEARCH用に GOOGLE_API_KEY と GOOGLE_CX を設定すると別経路で補えます。）"
+            )
+        root = ElementTree.fromstring(body)
         items = root.findall(".//item") or root.findall("channel/item")
         cutoff = None
         if time_filter:
