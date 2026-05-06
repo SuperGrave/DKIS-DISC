@@ -39,6 +39,7 @@ LINE 上で動作する **DKIS 互換の軽量 AI ボット**です。Flask の 
 - `LINE_BOOT_GREETING_USER_IDS`（**任意**。カンマ区切り `userId`。運用者向け。**省略時もマージされる**。ユーザー側は **`SET-SETTING`** の **`notify_worker_restart`** でオプトインすると、`known_line_users` に **`notify_on_restart=true`** が付いた Id にのみ定型 Push）
 - `LINE_BOOT_GREETING_PUSH_STORE_LIMIT`（既定 **50**。DB の購読者リストから読む上限）
 - `LINE_BOOT_GREETING_SKIP_STORED_IDS`（`1` で **オプトイン済み DB 宛先を無視**し、`LINE_BOOT_GREETING_USER_IDS` のみ）
+- 起動 Push の本文は **日本時間（Asia/Tokyo）の時（0〜23）ごとに 2 通り**あわせて **48 種**からランダム（ひきこもり／インドア寄りのトーン）
 - `PORT`（ローカル既定 `5000`。Render 等ではプラットフォームが自動設定）
 
 ## ローカル開発
