@@ -238,18 +238,22 @@ class LineBrain:
 
         while should_retry and retry_round < self._config.max_retry_chain:
             retry_round += 1
-            _emit_chunks(on_line_message, TEXT, out_parts=out_parts)
             cmd = (parsed.get("CMD") or "SPEAK").strip().upper()
             detail = _rt_arg_summary(cmd, parsed.get("ARGS"))
+            parts_body = (TEXT or "").strip()
+            notice = ""
             if show_retry_notice(notice_mode):
-                rt_line = format_retry_notice_line(
+                notice = format_retry_notice_line(
                     retry_round,
                     cmd,
                     detail,
                     usage,
                     abbreviated=retry_line_abbreviated(notice_mode),
                 )
-                _emit_chunks(on_line_message, rt_line, out_parts=out_parts)
+            combined = parts_body
+            if notice:
+                combined = f"{parts_body}\n{notice}" if parts_body else notice
+            _emit_chunks(on_line_message, combined, out_parts=out_parts)
 
             ri_raw = summary if isinstance(summary, str) else ""
             if not ri_raw:

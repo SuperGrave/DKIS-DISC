@@ -33,7 +33,7 @@ def split_line_text(text: str, *, max_chunks: int | None = None) -> list[str]:
 
 
 def flatten_reply_parts(parts: list[str]) -> list[str]:
-    """複数パート（中間応答・[RT#…]・最終文）を LINE の最大バブル数に収める。"""
+    """複数パートを LINE の最大バブル数に収める（長文のみ分割）。"""
     cleaned = [(p or "").strip() for p in parts if (p or "").strip()]
     if not cleaned:
         return split_line_text("")

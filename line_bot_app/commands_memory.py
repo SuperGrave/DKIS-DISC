@@ -30,9 +30,9 @@ _ALLOWED_SETTING_KEYS = frozenset(
 _TOOL_NOTICE_DB_VALUES = frozenset({"full", "abbrev", "minimal", "hidden"})
 
 _TOOL_NOTICE_MODE_HELP: dict[str, str] = {
-    "full": "リトライ=[RT#n]長形式・通常末尾=[N1]長形式",
-    "abbrev": "リトライ=[Rn]短形式・通常末尾=[N1]短形式",
-    "minimal": "リトライ=[Rn]短形式のみ（通常末尾なし）",
+    "full": "リトライ・末尾とも長めの ARGS 要約＋日本語ラベル（例: [R1]検索 … t:…）",
+    "abbrev": "リトライ・末尾とも短い ARGS 要約＋日本語ラベル",
+    "minimal": "リトライ行のみ（末尾なし）。本文と同じ吹き出しに付与",
     "hidden": "システム行なし（レガシー show_ri_text=false と同等）",
 }
 
