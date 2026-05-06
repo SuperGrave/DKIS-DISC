@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS memory_files (
     filename TEXT PRIMARY KEY,
     content TEXT NOT NULL DEFAULT '',
     description TEXT NOT NULL DEFAULT '',
+    content_chars INTEGER NOT NULL DEFAULT 0,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -19,3 +20,7 @@ ALTER TABLE memory_files ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_settings ENABLE ROW LEVEL SECURITY;
 
 -- updated_at はアプリの upsert 時に ISO8601 で更新します（トリガー不要）。
+--
+-- ▼ 既存 DB に適用する場合（LIST-FILES の転送量軽量化・一覧時のみ文字数を参照）
+ALTER TABLE memory_files ADD COLUMN IF NOT EXISTS content_chars INTEGER NOT NULL DEFAULT 0;
+UPDATE memory_files SET content_chars = length(coalesce(content, ''));

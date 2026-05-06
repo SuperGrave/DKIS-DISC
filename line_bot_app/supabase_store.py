@@ -87,16 +87,46 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _normalize_list_row(row: dict[str, Any]) -> dict[str, Any]:
+    cc_raw = row.get("char_count")
+    if cc_raw is None:
+        cc_raw = row.get("content_chars")
+    try:
+        char_count = int(cc_raw) if cc_raw is not None else 0
+    except (TypeError, ValueError):
+        char_count = 0
+    return {
+        "filename": row.get("filename"),
+        "description": row.get("description") or "",
+        "updated_at": row.get("updated_at"),
+        "char_count": max(0, char_count),
+    }
+
+
 def memory_list_files() -> tuple[list[dict[str, Any]], str]:
     sb = _client()
     if sb is None:
         return [], "Supabase が未設定です。"
     try:
-        r = sb.table("memory_files").select("filename,description,updated_at").order("filename").execute()
-        rows = r.data or []
+        r = sb.table("memory_files").select("filename,description,updated_at,content_chars").order("filename").execute()
+        rows = [_normalize_list_row(dict(row)) for row in (r.data or [])]
         return rows, ""
-    except Exception as exc:
-        return [], str(exc)
+    except Exception:
+        try:
+            r = sb.table("memory_files").select("filename,description,updated_at,content").order("filename").execute()
+            out: list[dict[str, Any]] = []
+            for row in r.data or []:
+                body = str(row.get("content") or "")
+                slim = {
+                    "filename": row.get("filename"),
+                    "description": row.get("description") or "",
+                    "updated_at": row.get("updated_at"),
+                    "char_count": len(body),
+                }
+                out.append(slim)
+            return out, ""
+        except Exception as exc:
+            return [], str(exc)
 
 
 def memory_read_row(filename: str) -> tuple[dict[str, Any] | None, str]:
@@ -133,19 +163,24 @@ def memory_write(filename: str, content: str, description: str = "") -> str:
     if sb is None:
         return "Supabase が未設定です。"
     desc = (description or "").strip()[:5000]
+    base_row = {
+        "filename": fn,
+        "content": body,
+        "description": desc,
+        "updated_at": _now_iso(),
+    }
     try:
         sb.table("memory_files").upsert(
-            {
-                "filename": fn,
-                "content": body,
-                "description": desc,
-                "updated_at": _now_iso(),
-            },
+            {**base_row, "content_chars": len(body)},
             on_conflict="filename",
         ).execute()
         return ""
-    except Exception as exc:
-        return str(exc)
+    except Exception:
+        try:
+            sb.table("memory_files").upsert(base_row, on_conflict="filename").execute()
+            return ""
+        except Exception as exc:
+            return str(exc)
 
 
 def memory_append(filename: str, append_content: str) -> str:
@@ -168,15 +203,19 @@ def memory_append(filename: str, append_content: str) -> str:
         merged = old + sep + chunk
         if len(merged) > MAX_MEMORY_CONTENT_CHARS:
             merged = merged[: MAX_MEMORY_CONTENT_CHARS - 80] + "\n…（結合後に長すぎるため切り詰めました）"
-        sb.table("memory_files").upsert(
-            {
-                "filename": fn,
-                "content": merged,
-                "description": desc,
-                "updated_at": _now_iso(),
-            },
-            on_conflict="filename",
-        ).execute()
+        base_row = {
+            "filename": fn,
+            "content": merged,
+            "description": desc,
+            "updated_at": _now_iso(),
+        }
+        try:
+            sb.table("memory_files").upsert(
+                {**base_row, "content_chars": len(merged)},
+                on_conflict="filename",
+            ).execute()
+        except Exception:
+            sb.table("memory_files").upsert(base_row, on_conflict="filename").execute()
         return ""
     except Exception as exc:
         return str(exc)
@@ -185,11 +224,17 @@ def memory_append(filename: str, append_content: str) -> str:
 def dumps_memory_index(rows: list[dict[str, Any]]) -> str:
     slim = []
     for row in rows:
+        cc = row.get("char_count")
+        try:
+            char_count = int(cc) if cc is not None else 0
+        except (TypeError, ValueError):
+            char_count = 0
         slim.append(
             {
                 "filename": row.get("filename"),
                 "description": row.get("description") or "",
                 "updated_at": row.get("updated_at"),
+                "char_count": max(0, char_count),
             }
         )
     return json.dumps(slim, ensure_ascii=False)

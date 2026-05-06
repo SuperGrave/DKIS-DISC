@@ -12,6 +12,16 @@ from .config import AppConfig
 from .input_build import build_input_segments
 from .line_messages import split_line_text
 from .parsing import parse_ai_response
+from .supabase_store import get_db_setting
+from .tool_notice import (
+    ToolNoticeMode,
+    format_normal_footer_line,
+    format_retry_notice_line,
+    parse_tool_notice_mode,
+    retry_line_abbreviated,
+    show_normal_footer,
+    show_retry_notice,
+)
 
 
 def _usage_from_response(response: object) -> dict:
@@ -24,18 +34,6 @@ def _usage_from_response(response: object) -> dict:
         if v is not None:
             out[k] = v
     return out
-
-
-def _usage_suffix(usage: dict | None) -> str:
-    if not usage:
-        return "tok=—"
-    tt = usage.get("total_tokens")
-    if tt is not None:
-        return f"tt={tt}"
-    pt, ct = usage.get("prompt_tokens"), usage.get("completion_tokens")
-    if pt is not None and ct is not None:
-        return f"pt={pt} ct={ct}"
-    return "tok=—"
 
 
 def _rt_arg_summary(command: str, args: object) -> str:
@@ -122,7 +120,6 @@ class LineBrain:
 
     def _resolve_openai_model(self) -> str:
         from .chat_models import resolve_chat_model
-        from .supabase_store import get_db_setting
 
         return resolve_chat_model(
             get_db_setting("current_model", ""),
@@ -130,11 +127,11 @@ class LineBrain:
             self._config.allowed_chat_models,
         )
 
-    def _resolve_show_ri_text(self) -> bool:
-        from .supabase_store import get_db_setting
-
-        v = get_db_setting("show_ri_text", "true").strip().lower()
-        return v not in ("0", "false", "no", "off")
+    def _resolve_tool_notice_mode(self) -> ToolNoticeMode:
+        return parse_tool_notice_mode(
+            get_db_setting("tool_notice_display", ""),
+            legacy_show_ri_text=get_db_setting("show_ri_text", "true"),
+        )
 
     def _ensure_session(self, user_id: str) -> list[dict]:
         key = user_id or "anonymous"
@@ -209,6 +206,8 @@ class LineBrain:
 
         uid = user_id or "anonymous"
 
+        notice_mode = self._resolve_tool_notice_mode()
+
         messages = self._ensure_session(uid)
         lp = self._last_proc_by_user.get(uid, "（前回処理なし）")
 
@@ -241,8 +240,14 @@ class LineBrain:
             _emit_chunks(on_line_message, TEXT, out_parts=out_parts)
             cmd = (parsed.get("CMD") or "SPEAK").strip().upper()
             detail = _rt_arg_summary(cmd, parsed.get("ARGS"))
-            rt_line = f"[RT#{retry_round}]{cmd}:{detail} {_usage_suffix(usage)}"
-            if self._resolve_show_ri_text():
+            if show_retry_notice(notice_mode):
+                rt_line = format_retry_notice_line(
+                    retry_round,
+                    cmd,
+                    detail,
+                    usage,
+                    abbreviated=retry_line_abbreviated(notice_mode),
+                )
                 _emit_chunks(on_line_message, rt_line, out_parts=out_parts)
 
             ri_raw = summary if isinstance(summary, str) else ""
@@ -278,8 +283,21 @@ class LineBrain:
         self._trim(messages)
 
         final_text = (TEXT or "").strip()
+        footer_line = ""
+        if show_normal_footer(notice_mode):
+            cmd_last = (parsed.get("CMD") or "SPEAK").strip().upper()
+            detail_last = _rt_arg_summary(cmd_last, parsed.get("ARGS"))
+            footer_line = format_normal_footer_line(
+                cmd_last,
+                detail_last,
+                usage,
+                abbreviated=(notice_mode is ToolNoticeMode.ABBREV),
+            )
         if final_text:
-            _emit_chunks(on_line_message, final_text, out_parts=out_parts)
+            combined = final_text + (("\n" + footer_line) if footer_line else "")
+            _emit_chunks(on_line_message, combined, out_parts=out_parts)
+        elif footer_line:
+            _emit_chunks(on_line_message, footer_line, out_parts=out_parts)
 
         fallback = "すみません、うまく返答を組み立てられませんでした。"
         if not out_parts:

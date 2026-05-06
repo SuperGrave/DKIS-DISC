@@ -8,6 +8,10 @@ from typing import Any
 from openai import OpenAI
 
 from .chat_models import format_allowed_models_hint, resolve_chat_model
+from .tool_notice import (
+    ALLOWED_TOOL_NOTICE_DISPLAY_HINT,
+    parse_tool_notice_mode,
+)
 from .commands import CommandServices
 from .supabase_store import (
     dumps_memory_index,
@@ -20,7 +24,17 @@ from .supabase_store import (
     validate_memory_filename,
 )
 
-_ALLOWED_SETTING_KEYS = frozenset({"current_model", "show_ri_text", "text.use_raw_result"})
+_ALLOWED_SETTING_KEYS = frozenset(
+    {"current_model", "show_ri_text", "tool_notice_display", "text.use_raw_result"}
+)
+_TOOL_NOTICE_DB_VALUES = frozenset({"full", "abbrev", "minimal", "hidden"})
+
+_TOOL_NOTICE_MODE_HELP: dict[str, str] = {
+    "full": "リトライ=[RT#n]長形式・通常末尾=[N1]長形式",
+    "abbrev": "リトライ=[Rn]短形式・通常末尾=[N1]短形式",
+    "minimal": "リトライ=[Rn]短形式のみ（通常末尾なし）",
+    "hidden": "システム行なし（レガシー show_ri_text=false と同等）",
+}
 
 _READ_SUMMARY_INPUT_CAP = 14_000
 
@@ -168,6 +182,7 @@ def cmd_get_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | Non
     defaults = {
         "current_model": svc.config.openai_model,
         "show_ri_text": "true",
+        "tool_notice_display": "",
         "text.use_raw_result": "false",
     }
     val = get_db_setting(key, defaults.get(key, ""))
@@ -178,6 +193,16 @@ def cmd_get_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | Non
             f"{key} DB値={val!r}\n"
             f"実効モデル={eff!r}\n"
             f"許可リスト（SET-SETTING で指定できる値）: {hint}"
+        )
+    elif key == "tool_notice_display":
+        legacy = get_db_setting("show_ri_text", "true")
+        eff = parse_tool_notice_mode(val, legacy_show_ri_text=legacy)
+        hint_eff = _TOOL_NOTICE_MODE_HELP.get(eff.value, "")
+        line = (
+            f"{key} DB値={val!r}\n"
+            f"実効モード={eff.value}（{hint_eff}）\n"
+            f"legacy show_ri_text={legacy!r}（tool_notice_display が空のときのみ効く）\n"
+            f"SET で使える値: {ALLOWED_TOOL_NOTICE_DISPLAY_HINT}"
         )
     else:
         line = f"{key} = {val!r}"
@@ -198,12 +223,23 @@ def cmd_set_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | Non
             hint = format_allowed_models_hint(svc.config.allowed_chat_models)
             msg = f"このモデルは許可リストにありません: {vm!r}。許可: {hint}"
             return (TEXT or "").strip(), "SET-SETTING 拒否", msg, None, None
+    if key == "tool_notice_display":
+        vm = val.strip().lower()
+        if vm and vm not in _TOOL_NOTICE_DB_VALUES:
+            msg = (
+                f"tool_notice_display は {sorted(_TOOL_NOTICE_DB_VALUES)} のいずれか、"
+                f"または空（レガシーの show_ri_text に従う）です。"
+            )
+            return (TEXT or "").strip(), "SET-SETTING 拒否", msg, None, None
     ok, err = set_db_setting(key, val)
     if not ok:
         return (TEXT or "").strip(), "SET-SETTING 失敗", err or "不明なエラー", None, None
     line = f"{key} を保存しました。"
     if key == "current_model":
         line += f" 実効モデルは {resolve_chat_model(val, svc.config.openai_model, svc.config.allowed_chat_models)!r} です。"
+    elif key == "tool_notice_display":
+        eff = parse_tool_notice_mode(val, legacy_show_ri_text=get_db_setting("show_ri_text", "true"))
+        line += f" 実効モードは {eff.value} です。"
     else:
         line += "（値の妥当性はモデル側・運用で確認してください）。"
     return TEXT or "", f"SET-SETTING {key}", line, None, None
