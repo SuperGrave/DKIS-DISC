@@ -7,6 +7,7 @@ from typing import Any
 
 from openai import OpenAI
 
+from .chat_models import format_allowed_models_hint, resolve_chat_model
 from .commands import CommandServices
 from .supabase_store import (
     dumps_memory_index,
@@ -25,10 +26,11 @@ _READ_SUMMARY_INPUT_CAP = 14_000
 
 
 def _effective_openai_model(svc: CommandServices) -> str:
-    db = get_db_setting("current_model", "").strip()
-    if db:
-        return db
-    return svc.config.openai_model
+    return resolve_chat_model(
+        get_db_setting("current_model", ""),
+        svc.config.openai_model,
+        svc.config.allowed_chat_models,
+    )
 
 
 def _summarize_long_text(client: OpenAI, model: str, raw: str) -> tuple[str, str]:
@@ -169,7 +171,16 @@ def cmd_get_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | Non
         "text.use_raw_result": "false",
     }
     val = get_db_setting(key, defaults.get(key, ""))
-    line = f"{key} = {val!r}"
+    if key == "current_model":
+        eff = resolve_chat_model(val, svc.config.openai_model, svc.config.allowed_chat_models)
+        hint = format_allowed_models_hint(svc.config.allowed_chat_models)
+        line = (
+            f"{key} DB値={val!r}\n"
+            f"実効モデル={eff!r}\n"
+            f"許可リスト（SET-SETTING で指定できる値）: {hint}"
+        )
+    else:
+        line = f"{key} = {val!r}"
     return TEXT or "", f"GET-SETTING {key}", line, None, None
 
 
@@ -181,10 +192,20 @@ def cmd_set_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | Non
     if key not in _ALLOWED_SETTING_KEYS:
         msg = f"key は {_ALLOWED_SETTING_KEYS} のいずれかです。"
         return (TEXT or "").strip(), "SET-SETTING 検証", msg, None, None
+    if key == "current_model":
+        vm = val.strip()
+        if vm and vm not in svc.config.allowed_chat_models:
+            hint = format_allowed_models_hint(svc.config.allowed_chat_models)
+            msg = f"このモデルは許可リストにありません: {vm!r}。許可: {hint}"
+            return (TEXT or "").strip(), "SET-SETTING 拒否", msg, None, None
     ok, err = set_db_setting(key, val)
     if not ok:
         return (TEXT or "").strip(), "SET-SETTING 失敗", err or "不明なエラー", None, None
-    line = f"{key} を保存しました（値の妥当性はモデル側・運用で確認してください）。"
+    line = f"{key} を保存しました。"
+    if key == "current_model":
+        line += f" 実効モデルは {resolve_chat_model(val, svc.config.openai_model, svc.config.allowed_chat_models)!r} です。"
+    else:
+        line += "（値の妥当性はモデル側・運用で確認してください）。"
     return TEXT or "", f"SET-SETTING {key}", line, None, None
 
 

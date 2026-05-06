@@ -1,6 +1,16 @@
 {
   "ai_models": {
-    "main": "gpt-5.4-mini"
+    "main": "gpt-4o-mini",
+    "allowed_chat_models": [
+      "gpt-4o-mini",
+      "gpt-4o",
+      "gpt-4.1-mini",
+      "gpt-4.1",
+      "gpt-4-turbo",
+      "gpt-3.5-turbo",
+      "o4-mini",
+      "o3-mini"
+    ]
   },
   "system_prompts": {
     "main_file": "system_prompt_main.txt"

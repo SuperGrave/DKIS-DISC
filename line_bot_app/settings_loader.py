@@ -7,6 +7,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from .chat_models import DEFAULT_ALLOWED_CHAT_MODELS
+
 
 @dataclass(frozen=True)
 class InputFormatMain:
@@ -23,6 +25,7 @@ class JsonSettings:
     path: Path
     system_prompt_main: str
     openai_model: str
+    allowed_chat_models: frozenset[str]
     max_retry_chain: int
     max_history_turns: int
     max_retry_payload_chars: int
@@ -103,10 +106,19 @@ def load_json_settings() -> JsonSettings:
             "dist/settings.json の system_prompts.main_file または main を確認してください。"
         )
 
+    main_model = str(ai_models.get("main") or "gpt-4o-mini").strip()
+    raw_allow = ai_models.get("allowed_chat_models")
+    if isinstance(raw_allow, list) and raw_allow:
+        allowed_chat_models = frozenset(str(x).strip() for x in raw_allow if str(x).strip())
+    else:
+        allowed_chat_models = DEFAULT_ALLOWED_CHAT_MODELS
+    allowed_chat_models = allowed_chat_models | {main_model}
+
     return JsonSettings(
         path=path,
         system_prompt_main=prompt_main,
-        openai_model=str(ai_models.get("main") or "gpt-4.1-mini"),
+        openai_model=main_model,
+        allowed_chat_models=allowed_chat_models,
         max_retry_chain=max(1, int(control.get("max_retries", 10))),
         max_history_turns=max(1, int(control.get("max_history", 10))),
         max_retry_payload_chars=max(2000, int(control.get("max_retry_payload_chars", 10000))),

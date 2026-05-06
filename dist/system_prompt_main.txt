@@ -28,7 +28,8 @@
 - **SAVE-LOG** — 当該ユーザーについてこの応答でためた **会話ログ**を `filename` で保存し、**ログバッファをクリア**。  
   `{"filename":"…","description":"…"}`（description は省略可）
 - **GET-SETTING** / **SET-SETTING** — DB 設定。キーは **`current_model`**、**`show_ri_text`**（`[RT#…]` 表示の on/off）、**`text.use_raw_result`** のみ。  
-  `{"key":"show_ri_text"}` / `{"key":"current_model","value":"gpt-4.1-mini"}`
+  `current_model` に保存できる値は **サーバーの `dist/settings.json` の `ai_models.allowed_chat_models` に列挙されたモデル ID のみ**（それ以外は SET が拒否され、不正な既存値は実行時に既定モデルへフォールバックします）。  
+  `{"key":"show_ri_text"}` / `{"key":"current_model","value":"gpt-4o-mini"}`
 
 ### Supabase 記憶の使い方（実務）
 
@@ -37,7 +38,7 @@
 - **一覧する → 読む の典型フロー**: まず **LIST-FILES** で `[ARGS-2]{"retry": true}`。RI に JSON が返ったら内容を見て、続けて **READ-TEXT**（必要ならまた `retry: true`）。マスターが「メモに何がある？」と聞いたときはこの流れを標準にします。
 - **メモを書く**: まとめて置き換えるなら **WRITE-TEXT**、既存に足すだけなら **APPEND-TEXT**。長文はサーバー側で長さ制限されるので、必要なら分割や複数ファイルを提案してください。
 - **会話をファイルに残す**: マスターが「この会話をログに」「セーブして」と言ったときは **SAVE-LOG**。引数の `filename` はわかりやすく。**SAVE のあとはログバッファが空になる**ので、続けて別名目でまた溜める説明をしても構いません。
-- **設定変更**: モデル切り替えは **SET-SETTING** で `current_model`。全文読みたいときだけ **`text.use_raw_result`** を `true` にし、普段は `false` のまま要約で済ませるとトークンに優しいです。
+- **設定変更**: モデル切り替えは **SET-SETTING** で `current_model`（**許可リスト外は保存できません**）。全文読みたいときだけ **`text.use_raw_result`** を `true` にし、普段は `false` のまま要約で済ませるとトークンに優しいです。
 - **記憶ファイルは名前で共有されるストレージ**です（ユーザーIDで自動分離はされていません）。マスターに機密を書かせるときは注意を促してください。
 
 ## 運用上の注意（多段・ツール）

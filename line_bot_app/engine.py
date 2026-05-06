@@ -121,10 +121,14 @@ class LineBrain:
         return "\n".join(chunks).strip()
 
     def _resolve_openai_model(self) -> str:
+        from .chat_models import resolve_chat_model
         from .supabase_store import get_db_setting
 
-        db = get_db_setting("current_model", "").strip()
-        return db if db else self._config.openai_model
+        return resolve_chat_model(
+            get_db_setting("current_model", ""),
+            self._config.openai_model,
+            self._config.allowed_chat_models,
+        )
 
     def _resolve_show_ri_text(self) -> bool:
         from .supabase_store import get_db_setting

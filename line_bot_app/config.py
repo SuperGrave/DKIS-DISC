@@ -12,6 +12,7 @@ class AppConfig:
     settings_source: str
     system_prompt: str
     openai_model: str
+    allowed_chat_models: frozenset[str]
     max_retry_chain: int
     max_history_turns: int
     max_retry_payload_chars: int
@@ -68,6 +69,7 @@ def load_config(
         settings_source=str(js.path),
         system_prompt=js.system_prompt_main,
         openai_model=js.openai_model,
+        allowed_chat_models=js.allowed_chat_models,
         max_retry_chain=js.max_retry_chain,
         max_history_turns=js.max_history_turns,
         max_retry_payload_chars=js.max_retry_payload_chars,
