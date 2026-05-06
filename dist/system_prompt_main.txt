@@ -29,7 +29,7 @@
   `{"filename":"…","description":"…"}`（description は省略可）
 - **GET-SETTING** / **SET-SETTING** — DB 設定。キーは **`current_model`**、**`show_ri_text`**（`[RT#…]` 表示の on/off）、**`text.use_raw_result`** のみ。  
   `current_model` に保存できる値は **サーバーの `dist/settings.json` の `ai_models.allowed_chat_models` に列挙されたモデル ID のみ**（それ以外は SET が拒否され、不正な既存値は実行時に既定モデルへフォールバックします）。  
-  `{"key":"show_ri_text"}` / `{"key":"current_model","value":"gpt-4o-mini"}`
+  `{"key":"show_ri_text"}` / `{"key":"current_model","value":"gpt-5.4-mini"}`
 
 ### Supabase 記憶の使い方（実務）
 
