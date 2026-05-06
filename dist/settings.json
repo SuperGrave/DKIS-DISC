@@ -19,6 +19,7 @@
   "control": {
     "max_retries": 10,
     "max_history": 10,
+    "max_retry_payload_chars": 10000,
     "reset_history_on_prompt_change": false
   },
   "input_format": {

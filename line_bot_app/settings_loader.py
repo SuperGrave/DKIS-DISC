@@ -25,6 +25,7 @@ class JsonSettings:
     openai_model: str
     max_retry_chain: int
     max_history_turns: int
+    max_retry_payload_chars: int
     google_search_num: int
     news_max_items: int
     weather_api_timeout: float
@@ -108,6 +109,7 @@ def load_json_settings() -> JsonSettings:
         openai_model=str(ai_models.get("main") or "gpt-4.1-mini"),
         max_retry_chain=max(1, int(control.get("max_retries", 10))),
         max_history_turns=max(1, int(control.get("max_history", 10))),
+        max_retry_payload_chars=max(2000, int(control.get("max_retry_payload_chars", 10000))),
         google_search_num=max(1, min(10, int(search.get("result_count", 5)))),
         news_max_items=max(1, min(50, int(news.get("max_items", 10)))),
         weather_api_timeout=float(weather.get("api_timeout", 12)),

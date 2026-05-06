@@ -56,6 +56,18 @@ def _rt_arg_summary(command: str, args: object) -> str:
     return "-"
 
 
+def _truncate_tool_payload(text: str, limit: int) -> str:
+    """ツール生結果を LLM に再投入するときの上限（低メモリ環境での OOM 回避）。"""
+    if limit <= 0:
+        return text
+    s = text or ""
+    if len(s) <= limit:
+        return s
+    note = "\n\n…（以下省略。サーバー負荷・メモリ上限のため切り詰めました）"
+    keep = max(500, limit - len(note))
+    return s[:keep] + note
+
+
 def _emit_chunks(on_line_message: Callable[[str], None] | None, part: str, *, out_parts: list[str]) -> None:
     """論理パートを out_parts に積み、指定があれば分割済みチャンクをその場でコールバックする。"""
     p = (part or "").strip()
@@ -180,7 +192,10 @@ class LineBrain:
             rt_line = f"[RT#{retry_round}]{cmd}:{detail} {_usage_suffix(usage)}"
             _emit_chunks(on_line_message, rt_line, out_parts=out_parts)
 
-            ri_text = summary or TEXT or ""
+            ri_raw = summary if isinstance(summary, str) else ""
+            if not ri_raw:
+                ri_raw = TEXT or ""
+            ri_text = _truncate_tool_payload(ri_raw, self._config.max_retry_payload_chars)
             lp_now = self._last_proc_by_user.get(uid, lp)
             retry_payload = build_input_segments(
                 ri_text,
@@ -190,7 +205,9 @@ class LineBrain:
             )
             retry_formatted = retry_payload["text"]
 
-            messages.append({"role": "assistant", "content": ai_raw})
+            messages.append(
+                {"role": "assistant", "content": _truncate_tool_payload(ai_raw, self._config.max_retry_payload_chars)}
+            )
             messages.append({"role": "user", "content": retry_formatted})
             self._trim(messages)
 

@@ -14,6 +14,7 @@ class AppConfig:
     openai_model: str
     max_retry_chain: int
     max_history_turns: int
+    max_retry_payload_chars: int
     google_search_num: int
     news_max_items: int
     weather_api_timeout: float
@@ -69,6 +70,7 @@ def load_config(
         openai_model=js.openai_model,
         max_retry_chain=js.max_retry_chain,
         max_history_turns=js.max_history_turns,
+        max_retry_payload_chars=js.max_retry_payload_chars,
         google_search_num=js.google_search_num,
         news_max_items=js.news_max_items,
         weather_api_timeout=js.weather_api_timeout,
