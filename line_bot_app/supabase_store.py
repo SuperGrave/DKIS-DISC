@@ -102,6 +102,56 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def remember_line_user_for_push(uid: str | None) -> None:
+    """Webhook で観測した userId を保存（ワーカー起動時 Push の宛先候補）。"""
+    u = normalize_memory_user_id(uid)
+    if u == "anonymous":
+        return
+    sb = _client()
+    if sb is None:
+        return
+    try:
+        sb.table("known_line_users").upsert(
+            {"line_user_id": u, "last_seen_at": _now_iso()},
+            on_conflict="line_user_id",
+        ).execute()
+    except Exception:
+        pass
+
+
+def _boot_push_store_limit() -> int:
+    raw = (os.environ.get("LINE_BOOT_GREETING_PUSH_STORE_LIMIT") or "50").strip()
+    try:
+        n = int(raw)
+    except ValueError:
+        n = 50
+    return max(1, min(n, 2000))
+
+
+def list_known_line_user_ids_for_push() -> list[str]:
+    """Supabase に記録された userId を最近アクティブ順で返す（上限・テーブル未作成時は空）。"""
+    sb = _client()
+    if sb is None:
+        return []
+    lim = _boot_push_store_limit()
+    try:
+        r = (
+            sb.table("known_line_users")
+            .select("line_user_id")
+            .order("last_seen_at", desc=True)
+            .limit(lim)
+            .execute()
+        )
+        out: list[str] = []
+        for row in r.data or []:
+            lid = str(row.get("line_user_id") or "").strip()
+            if lid and lid != "anonymous":
+                out.append(lid)
+        return out
+    except Exception:
+        return []
+
+
 def _normalize_list_row(row: dict[str, Any]) -> dict[str, Any]:
     cc_raw = row.get("char_count")
     if cc_raw is None:

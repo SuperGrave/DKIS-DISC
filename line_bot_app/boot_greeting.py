@@ -8,6 +8,8 @@ import random
 
 from linebot.v3.messaging import ApiClient, MessagingApi, PushMessageRequest, TextMessage
 
+from .supabase_store import list_known_line_user_ids_for_push
+
 _VARIANTS: tuple[str, ...] = (
     "あ、お疲れ様ですー。スマホ見てませんでした。",
     "ゲームしてました。",
@@ -15,12 +17,37 @@ _VARIANTS: tuple[str, ...] = (
 )
 
 
+def _skip_stored_ids_for_boot_push() -> bool:
+    return (os.environ.get("LINE_BOOT_GREETING_SKIP_STORED_IDS") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _merged_boot_recipient_ids() -> list[str]:
+    env_raw = (os.environ.get("LINE_BOOT_GREETING_USER_IDS") or "").strip()
+    env_ids = [x.strip() for x in env_raw.split(",") if x.strip()]
+    extra = [] if _skip_stored_ids_for_boot_push() else list_known_line_user_ids_for_push()
+    seen: set[str] = set()
+    merged: list[str] = []
+    for uid in env_ids + extra:
+        if uid in seen:
+            continue
+        seen.add(uid)
+        merged.append(uid)
+    return merged
+
+
 def maybe_send_worker_boot_greetings(configuration: object, logger: logging.Logger) -> None:
-    """環境変数 ``LINE_BOOT_GREETING_USER_IDS``（カンマ区切り userId）があれば、定型文をランダムで Push。"""
-    raw = (os.environ.get("LINE_BOOT_GREETING_USER_IDS") or "").strip()
-    if not raw:
-        return
-    uids = [x.strip() for x in raw.split(",") if x.strip()]
+    """起動時に定型 Push。
+    - ``LINE_BOOT_GREETING_USER_IDS`` …カンマ区切りで明示（任意）
+    - Supabase の ``known_line_users`` …過去に Webhook で観測した userId（任意・上限あり）
+
+    LINE が過去ユーザ一覧を返すことはないため **Webhook での記録が前提**。デプロイ直後で一度も誰も話しかけていなければ送り先がありません。
+    """
+    uids = _merged_boot_recipient_ids()
     if not uids:
         return
     text = random.choice(_VARIANTS)

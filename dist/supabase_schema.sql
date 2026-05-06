@@ -20,9 +20,16 @@ CREATE TABLE IF NOT EXISTS user_settings (
     setting_value TEXT NOT NULL DEFAULT ''
 );
 
+-- LINE が過去ユーザーを一覧しないので、Webhook で見えた userId を記録（起動時 Push の宛先候補）
+CREATE TABLE IF NOT EXISTS known_line_users (
+    line_user_id TEXT PRIMARY KEY,
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- RLS: anon で公開しない運用なら service_role のみが書き込むので実質問題なし。
 ALTER TABLE memory_files ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE known_line_users ENABLE ROW LEVEL SECURITY;
 
 -- ▼ 次のブロックは「旧スキーマ（filename のみ PRIMARY KEY）」からの移行も兼ねます。
 -- 新規作成されたテーブルでも最後まで実行して問題ありません（PK を一度外して付け直します）。

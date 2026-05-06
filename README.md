@@ -36,7 +36,9 @@ LINE 上で動作する **DKIS 互換の軽量 AI ボット**です。Flask の 
 - `DKIS_SETTINGS_PATH`（既定はリポジトリ内の `dist/settings.json`）
 - `GOOGLE_API_KEY` / `GOOGLE_CX`（`SEARCH` 用）
 - `SUPABASE_URL` / `SUPABASE_KEY`（**記憶コマンド** `LIST-FILES` 等。`service_role` 推奨。未設定なら記憶系は案内エラーのみ）
-- `LINE_BOOT_GREETING_USER_IDS`（**任意**。カンマ区切りの LINE `userId`。プロセス起動時に定型文をランダム Push）
+- `LINE_BOOT_GREETING_USER_IDS`（**任意**。カンマ区切り `userId`。プロセス起動時に定型文をランダム Push。**省略時は Supabase の `known_line_users`** に自動記録された過去の送信元へ Push／明示 Id とマージ）
+- `LINE_BOOT_GREETING_PUSH_STORE_LIMIT`（既定 **50**。DB から読む宛先の上限）
+- `LINE_BOOT_GREETING_SKIP_STORED_IDS`（`1` で DB 由来の宛先を使わず環境変数の Id のみ）
 - `PORT`（ローカル既定 `5000`。Render 等ではプラットフォームが自動設定）
 
 ## ローカル開発

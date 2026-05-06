@@ -20,6 +20,7 @@ from .ai import AIResponder
 from .boot_greeting import maybe_send_worker_boot_greetings
 from .config import load_config
 from .line_messages import flatten_reply_parts
+from .supabase_store import remember_line_user_for_push
 from .user_messages import MSG_SYSTEM_FAILURE
 
 
@@ -69,6 +70,8 @@ def create_app() -> Flask:
         user_text = event.message.text
         uid = getattr(event.source, "user_id", None) or "anonymous"
         use_push = uid != "anonymous"
+        if use_push:
+            remember_line_user_for_push(uid)
 
         with ApiClient(line_configuration) as api_client:
             api = MessagingApi(api_client)
