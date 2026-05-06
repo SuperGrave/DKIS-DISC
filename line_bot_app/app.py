@@ -17,6 +17,7 @@ from linebot.v3.messaging import (
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
 from .ai import AIResponder
+from .boot_greeting import maybe_send_worker_boot_greetings
 from .config import load_config
 from .line_messages import flatten_reply_parts
 from .user_messages import MSG_SYSTEM_FAILURE
@@ -38,6 +39,9 @@ def create_app() -> Flask:
     handler = WebhookHandler(config.line_channel_secret)
     line_configuration = Configuration(access_token=config.line_channel_access_token)
     brain = AIResponder(config)
+
+    if line_ready:
+        maybe_send_worker_boot_greetings(line_configuration, app.logger)
 
     @app.get("/")
     def health_check():

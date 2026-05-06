@@ -23,3 +23,6 @@ services:
         sync: false
       - key: SUPABASE_KEY
         sync: false
+      # ワーカー起動時に定型文を Push する相手（任意・カンマ区切り LINE userId）
+      - key: LINE_BOOT_GREETING_USER_IDS
+        sync: false

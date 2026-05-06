@@ -10,7 +10,7 @@ LINE 上で動作する **DKIS 互換の軽量 AI ボット**です。Flask の 
 
 ## 機能概要
 
-- **`dist/settings.json`**: モデル名（`ai_models.main`）、**リトライ上限**（`control.max_retries`）、**履歴ターン**（`control.max_history`）、検索・ニュース・天気・入力フォーマットなど。
+- **`dist/settings.json`**: モデル名（`ai_models.main`）、**リトライ上限**（`control.max_retries`）、**会話履歴の長さ**（`control.max_history`。**リトライ1回ごとに user／assistant が増える**ので LINE の発話回数とは一致しません。再起動で消えるインメモリです）、検索・ニュース・天気・入力フォーマットなど。
 - **`dist/system_prompt_main.txt`**: メインシステムプロンプト本体（**Markdown 見出し・コードフェンス**で記述。拡張子は `.txt` のまま）。`settings.json` の `system_prompts.main_file` でパスを指定。
 - OpenAI は DKIS 形式の `[CMD]` / `[ARGS]` / `[ARGS-2]` を出力します。`SEARCH`・`NEWS`・`WEATHER`・`READ-PAGE` は **ツールの生結果を RI にそのまま載せて** 2 段目のモデル呼び出しへ進みます（中間要約用の別モデル呼び出しはありません）。
 - **`[ARGS-2].retry: true` の連鎖**では、中間の `[TEXT]`（例: 「もう少し調べますね」）や **`[RT#n]コマンド:引数 tt=…`**、最終 `[TEXT]` を **処理の進行に合わせて逐次**送ります（通常は **最初の1バブルだけ `reply_message`**、続きは **`push_message`（ユーザー ID 宛）**）。長いパートは `split_line_text` で分割します。`user_id` が取れない異常系では従来どおり 1 回の `reply` にまとめます。送信上限は LINE のプランに依存します。
@@ -36,6 +36,7 @@ LINE 上で動作する **DKIS 互換の軽量 AI ボット**です。Flask の 
 - `DKIS_SETTINGS_PATH`（既定はリポジトリ内の `dist/settings.json`）
 - `GOOGLE_API_KEY` / `GOOGLE_CX`（`SEARCH` 用）
 - `SUPABASE_URL` / `SUPABASE_KEY`（**記憶コマンド** `LIST-FILES` 等。`service_role` 推奨。未設定なら記憶系は案内エラーのみ）
+- `LINE_BOOT_GREETING_USER_IDS`（**任意**。カンマ区切りの LINE `userId`。プロセス起動時に定型文をランダム Push）
 - `PORT`（ローカル既定 `5000`。Render 等ではプラットフォームが自動設定）
 
 ## ローカル開発

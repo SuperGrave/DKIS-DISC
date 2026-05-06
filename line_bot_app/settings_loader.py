@@ -121,7 +121,7 @@ def load_json_settings() -> JsonSettings:
         openai_model=main_model,
         allowed_chat_models=allowed_chat_models,
         max_retry_chain=max(1, int(control.get("max_retries", 10))),
-        max_history_turns=max(1, int(control.get("max_history", 10))),
+        max_history_turns=max(1, int(control.get("max_history", 24))),
         max_retry_payload_chars=max(2000, int(control.get("max_retry_payload_chars", 10000))),
         google_search_num=max(1, min(10, int(search.get("result_count", 5)))),
         news_max_items=max(1, min(50, int(news.get("max_items", 10)))),
