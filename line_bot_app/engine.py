@@ -7,6 +7,7 @@ from collections.abc import Callable
 
 from openai import OpenAI
 
+from .boot_greeting import take_worker_boot_push_for_history
 from .commands import COMMAND_HANDLERS, CommandServices, ExportHooks
 from .config import AppConfig
 from .input_build import build_input_segments
@@ -210,6 +211,11 @@ class LineBrain:
         notice_mode = self._resolve_tool_notice_mode()
 
         messages = self._ensure_session(uid)
+        boot_line = take_worker_boot_push_for_history(uid)
+        if boot_line:
+            messages.append({"role": "assistant", "content": boot_line})
+            self._append_export_log(uid, "WORKER_BOOT_PUSH", boot_line)
+
         lp = self._last_proc_by_user.get(uid, "（前回処理なし）")
 
         self._append_export_log(uid, "USER", text)

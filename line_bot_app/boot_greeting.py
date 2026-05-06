@@ -113,6 +113,32 @@ _BOOT_GREETINGS_BY_HOUR: tuple[tuple[str, str], ...] = (
 )
 
 
+_pending_worker_boot_line_by_uid: dict[str, str] = {}
+
+
+def remember_worker_boot_push_for_history(uid: str, text: str) -> None:
+    """notify_worker_restart 宛に Push した本文を、次の応答生成で履歴へ差し込むために保存する。"""
+    u = (uid or "").strip()
+    if not u or u == "anonymous":
+        return
+    t = (text or "").strip()
+    if not t:
+        return
+    _pending_worker_boot_line_by_uid[u] = t
+
+
+def take_worker_boot_push_for_history(uid: str) -> str | None:
+    """保存済みの起動 Push 本文があれば取り出して削除する（1 回限り・assistant 行として使う）。"""
+    u = (uid or "").strip()
+    if not u or u == "anonymous":
+        return None
+    line = _pending_worker_boot_line_by_uid.pop(u, None)
+    if not line:
+        return None
+    s = line.strip()
+    return s if s else None
+
+
 def _boot_greeting_hour_jst() -> int:
     return datetime.now(ZoneInfo("Asia/Tokyo")).hour
 
@@ -131,6 +157,13 @@ def _skip_stored_ids_for_boot_push() -> bool:
         "yes",
         "on",
     )
+
+
+def _boot_push_subscriber_ids() -> set[str]:
+    """DB オプトイン（notify_on_restart）の宛先 Id のみ。"""
+    if _skip_stored_ids_for_boot_push():
+        return set()
+    return set(list_boot_notification_recipient_ids())
 
 
 def _merged_boot_recipient_ids() -> list[str]:
@@ -153,16 +186,26 @@ def maybe_send_worker_boot_greetings(configuration: object, logger: logging.Logg
     - Supabase の ``known_line_users.notify_on_restart=true`` …ユーザーが **SET-SETTING** でオプトインした Id のみ（任意・上限あり）
 
     LINE が過去ユーザ一覧を返すことはないため **Webhook での記録が前提**。``notify_worker_restart`` をオンにしたユーザーだけ DB 経由で届きます。環境変数の Id はそのままマージされます。
+
+    ``notify_worker_restart`` のユーザーへ届いた本文は、そのユーザーからの **次の 1 回の応答生成** で OpenAI 用履歴の先頭に assistant として差し込みます（文脈用・その後は通常どおり蓄積）。
     """
     uids = _merged_boot_recipient_ids()
     if not uids:
         return
+    subscriber_ids = _boot_push_subscriber_ids()
     text = pick_worker_boot_greeting_text()
+    sent = 0
     try:
         with ApiClient(configuration) as api_client:
             api = MessagingApi(api_client)
             for uid in uids:
-                api.push_message(PushMessageRequest(to=uid, messages=[TextMessage(text=text)]))
-        logger.info("LINE boot greeting sent to %d recipient(s)", len(uids))
+                try:
+                    api.push_message(PushMessageRequest(to=uid, messages=[TextMessage(text=text)]))
+                    sent += 1
+                    if uid in subscriber_ids:
+                        remember_worker_boot_push_for_history(uid, text)
+                except Exception:
+                    logger.exception("LINE boot greeting push failed for one recipient")
+        logger.info("LINE boot greeting sent to %d recipient(s)", sent)
     except Exception:
-        logger.exception("LINE boot greeting push failed")
+        logger.exception("LINE boot greeting ApiClient failed")
