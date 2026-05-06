@@ -17,6 +17,8 @@ from linebot.v3.messaging import (
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
 from .ai import AIResponder
+from .config import load_config
+from .line_messages import flatten_reply_parts
 from .user_messages import MSG_SYSTEM_FAILURE
 
 
