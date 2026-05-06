@@ -35,6 +35,7 @@ LINE 上で動作する **DKIS 互換の軽量 AI ボット**です。Flask の 
 
 - `DKIS_SETTINGS_PATH`（既定はリポジトリ内の `dist/settings.json`）
 - `GOOGLE_API_KEY` / `GOOGLE_CX`（`SEARCH` 用）
+- `SUPABASE_URL` / `SUPABASE_KEY`（**記憶コマンド** `LIST-FILES` 等。`service_role` 推奨。未設定なら記憶系は案内エラーのみ）
 - `PORT`（ローカル既定 `5000`。Render 等ではプラットフォームが自動設定）
 
 ## ローカル開発

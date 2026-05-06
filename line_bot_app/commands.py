@@ -1,9 +1,11 @@
-"""SEARCH / NEWS / WEATHER / READ-PAGE / SPEAK（ツール結果は要約せずそのまま RI へ）。"""
+"""SEARCH / NEWS / WEATHER / READ-PAGE / SPEAK / Supabase 記憶コマンド（ツール結果は RI へ）。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
+
+from openai import OpenAI
 
 from .config import AppConfig
 from .google_cse import google_custom_search
@@ -24,22 +26,25 @@ def _clamp_web_tool_text(text: str, *, limit: int = _WEB_TOOL_TEXT_MAX) -> str:
 
 
 @dataclass
+class ExportHooks:
+    """SAVE-LOG 用: LineBrain がユーザー別の会話エクスポートバッファへ追記・取出しする。"""
+
+    append_log: Callable[[str, str, str], None]
+    take_clear_log: Callable[[str], str]
+
+
+@dataclass
 class CommandServices:
     config: AppConfig
+    client: OpenAI
+    hooks: ExportHooks
 
 
-def cmd_speak(_svc: CommandServices, _args: dict, TEXT: str, NOTE: str | None = None):
+def cmd_speak(_svc: CommandServices, _args: dict, TEXT: str, NOTE: str | None = None, *, user_id=None):
     return ((TEXT or "").strip(), "通常会話応答")
 
 
-def cmd_save_log(_svc: CommandServices, _args: dict, TEXT: str, NOTE: str | None = None):
-    return (
-        TEXT or "クラウド版では会話ログのファイル保存は行えません。",
-        "SAVE-LOG は無効",
-    )
-
-
-def cmd_search(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None):
+def cmd_search(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None, *, user_id=None):
     query = args.get("query", "").strip() if isinstance(args, dict) else ""
     if not query:
         return (TEXT or "").strip(), "SEARCH: query なし", "検索語が空です。", None, None
@@ -63,7 +68,7 @@ def cmd_search(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = N
     return TEXT or "", dmis_log, blob, blob, None
 
 
-def cmd_news(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None):
+def cmd_news(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None, *, user_id=None):
     query = args.get("query", "").strip() if isinstance(args, dict) else ""
     if not query:
         return (TEXT or "").strip(), "NEWS: query なし", "ニュースのキーワードが空です。", None, None
@@ -86,7 +91,7 @@ def cmd_news(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = Non
     return TEXT or "", dmis_log, blob, blob, None
 
 
-def cmd_weather(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None):
+def cmd_weather(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None, *, user_id=None):
     place = ""
     if isinstance(args, dict):
         place = (args.get("w_location") or "").strip()
@@ -104,7 +109,7 @@ def cmd_weather(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = 
     return TEXT or "", dmis_log, blob, blob, None
 
 
-def cmd_read_page(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None):
+def cmd_read_page(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None, *, user_id=None):
     url = args.get("url", "").strip() if isinstance(args, dict) else ""
     if not url:
         return (
@@ -125,11 +130,13 @@ def cmd_read_page(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None 
     return TEXT or "", dmis_log, raw_text, raw_text, None
 
 
+from .commands_memory import MEMORY_COMMAND_HANDLERS
+
 COMMAND_HANDLERS: dict[str, Any] = {
     "SPEAK": cmd_speak,
-    "SAVE-LOG": cmd_save_log,
     "SEARCH": cmd_search,
     "NEWS": cmd_news,
     "WEATHER": cmd_weather,
     "READ-PAGE": cmd_read_page,
 }
+COMMAND_HANDLERS.update(MEMORY_COMMAND_HANDLERS)

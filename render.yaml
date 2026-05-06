@@ -19,3 +19,7 @@ services:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
