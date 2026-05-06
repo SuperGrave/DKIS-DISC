@@ -71,7 +71,7 @@ def _summarize_long_text(client: OpenAI, model: str, raw: str) -> tuple[str, str
 
 
 def cmd_list_files(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None, *, user_id=None):
-    rows, err = memory_list_files()
+    rows, err = memory_list_files(user_id or "")
     if err:
         msg = f"LIST-FILES エラー: {err}"
         return (TEXT or "").strip(), "LIST-FILES 失敗", msg, None, None
@@ -85,7 +85,7 @@ def cmd_read_text(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None 
     if not fn_raw:
         return (TEXT or "").strip(), "READ-TEXT: filename なし", "filename を ARGS に指定してください。", None, None
 
-    row, err = memory_read_row(fn_raw)
+    row, err = memory_read_row(fn_raw, user_id or "")
     if err and not row:
         return (TEXT or "").strip(), "READ-TEXT 失敗", err, None, None
     if row is None and not err:
@@ -125,7 +125,7 @@ def cmd_write_text(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None
         msg = "filename が不正か空です。"
         return (TEXT or "").strip(), "WRITE-TEXT 検証エラー", msg, None, None
 
-    err = memory_write(fn, content, description)
+    err = memory_write(fn, content, description, user_id or "")
     if err:
         return (TEXT or "").strip(), "WRITE-TEXT 失敗", err, None, None
     ok = f"WRITE-TEXT 完了: {fn}"
@@ -143,7 +143,7 @@ def cmd_append_text(svc: CommandServices, args: dict, TEXT: str, NOTE: str | Non
     if not chunk:
         return (TEXT or "").strip(), "APPEND-TEXT: content なし", "追記する content が空です。", None, None
 
-    err = memory_append(fn, chunk)
+    err = memory_append(fn, chunk, user_id or "")
     if err:
         return (TEXT or "").strip(), "APPEND-TEXT 失敗", err, None, None
     ok = f"APPEND-TEXT 完了: {fn}"
@@ -165,7 +165,7 @@ def cmd_save_log_supabase(svc: CommandServices, args: dict, TEXT: str, NOTE: str
         msg = "保存する会話ログが空です（このユーザーでまだメッセージが蓄積されていません）。"
         return (TEXT or "").strip(), "SAVE-LOG: 空", msg, None, None
 
-    err = memory_write(fn, body, description)
+    err = memory_write(fn, body, description, uid)
     if err:
         return (TEXT or "").strip(), "SAVE-LOG 失敗", err, None, None
     ok = f"SAVE-LOG 完了: {fn}（ログバッファをクリアしました）"
@@ -206,6 +206,7 @@ def cmd_get_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | Non
         )
     else:
         line = f"{key} = {val!r}"
+    line += "\n※この値はボット全体（すべての LINE ユーザー）で共通です。"
     return TEXT or "", f"GET-SETTING {key}", line, None, None
 
 
@@ -242,6 +243,7 @@ def cmd_set_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | Non
         line += f" 実効モードは {eff.value} です。"
     else:
         line += "（値の妥当性はモデル側・運用で確認してください）。"
+    line += "\n※変更はボット全体（すべての LINE ユーザー）に反映されます。"
     return TEXT or "", f"SET-SETTING {key}", line, None, None
 
 

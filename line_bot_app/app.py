@@ -17,8 +17,7 @@ from linebot.v3.messaging import (
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
 from .ai import AIResponder
-from .config import load_config
-from .line_messages import flatten_reply_parts
+from .user_messages import MSG_SYSTEM_FAILURE
 
 
 def create_app() -> Flask:
@@ -99,7 +98,7 @@ def create_app() -> Flask:
                     )
             except Exception:
                 app.logger.exception("OpenAI reply generation failed")
-                err = "すみません、今ちょっと返答に失敗しました。少し時間を置いてもう一度話しかけてください。"
+                err = MSG_SYSTEM_FAILURE
                 try:
                     msgs = [TextMessage(text=err)]
                     if reply_pending:

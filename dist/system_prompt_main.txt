@@ -27,7 +27,7 @@
 - **APPEND-TEXT** — 末尾追記。`{"filename":"…","content":"…"}`
 - **SAVE-LOG** — 当該ユーザーについてこの応答でためた **会話ログ**を `filename` で保存し、**ログバッファをクリア**。  
   `{"filename":"…","description":"…"}`（description は省略可）
-- **GET-SETTING** / **SET-SETTING** — DB 設定。キーは **`current_model`**、**`tool_notice_display`**（システム行の表示方式）、**`show_ri_text`**（レガシー。`tool_notice_display` が空のときだけ効く）、**`text.use_raw_result`**。  
+- **GET-SETTING** / **SET-SETTING** — **`user_settings`** の読み書き。**ひとつの値がボット全体（すべての LINE ユーザー）で共通**になります。キーは **`current_model`**、**`tool_notice_display`**（システム行の表示方式）、**`show_ri_text`**（レガシー。`tool_notice_display` が空のときだけ効く）、**`text.use_raw_result`**。  
   **`tool_notice_display`**（優先）: **`full`**（リトライ `[RT#n]` 長文＋通常返答末尾 `[N1]` 長文）、**`abbrev`**（リトライ `[Rn]` 短文＋末尾 `[N1]` 短文）、**`minimal`**（リトライ短文のみ）、**`hidden`**（非表示）。  
   `current_model` に保存できる値は **サーバーの `dist/settings.json` の `ai_models.allowed_chat_models` に列挙されたモデル ID のみ**（それ以外は SET が拒否され、不正な既存値は実行時に既定モデルへフォールバックします）。  
   `{"key":"tool_notice_display","value":"abbrev"}` / `{"key":"current_model","value":"gpt-5.4-mini"}`
@@ -40,7 +40,7 @@
 - **メモを書く**: まとめて置き換えるなら **WRITE-TEXT**、既存に足すだけなら **APPEND-TEXT**。長文はサーバー側で長さ制限されるので、必要なら分割や複数ファイルを提案してください。
 - **会話をファイルに残す**: マスターが「この会話をログに」「セーブして」と言ったときは **SAVE-LOG**。引数の `filename` はわかりやすく。**SAVE のあとはログバッファが空になる**ので、続けて別名目でまた溜める説明をしても構いません。
 - **設定変更**: モデルは **SET-SETTING** の `current_model`（許可リスト外は不可）。**ツール実行のシステム行**は **`tool_notice_display`** でまとめて指定（未設定時は従来どおり **`show_ri_text`** で `[RT#…]` の on/off）。全文読みたいときだけ **`text.use_raw_result`** を `true` にし、普段は `false` のまま要約で済ませるとトークンに優しいです。
-- **記憶ファイルは名前で共有されるストレージ**です（ユーザーIDで自動分離はされていません）。マスターに機密を書かせるときは注意を促してください。
+- **記憶ファイル（LIST / READ / WRITE / APPEND / SAVE-LOG で触れる本文）は LINE アカウントごと**です。**モデルや GET/SET の値は全員共通**です。機密はファイル保存にも注意してください。
 
 ## 運用上の注意（多段・ツール）
 

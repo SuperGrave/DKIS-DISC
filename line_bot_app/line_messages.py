@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .user_messages import MSG_EMPTY_REPLY
 
 LINE_TEXT_LIMIT = 5000
 MAX_REPLY_MESSAGES = 5
@@ -12,7 +13,7 @@ def split_line_text(text: str, *, max_chunks: int | None = None) -> list[str]:
 
     normalized = (text or "").strip()
     if not normalized:
-        return ["すみません、返答が空になってしまいました。"]
+        return [MSG_EMPTY_REPLY]
 
     chunks: list[str] = []
     remaining = normalized

@@ -173,7 +173,8 @@ DKIS 形式どおり、**`retry: true` は AI 応答の `[ARGS-2]`** に依存�
 ## 12. 既知の限界・将来拡張
 
 - **DELETE-FILE**／DB行削除コマンドは未実装。
-- **ユーザー別 memory_files** は未実装（現状は **グローバルな名前空間**）。マルチユーザーで衝突しないよう運用またはスキーマ拡張（`user_id` カラム）が必要になり得る。
+- **ユーザー別 `memory_files`**: `line_user_id`（LINE `user_id`）と `filename` の複合キーで分離。
+- **`user_settings` はボット全体共通**: `setting_key` ごとに 1 値のみ（全ユーザーで共有）。
 - **Rate limit・バックオフ**は SDK 任せ。大量 LIST でのコストは運用側で調整。
 
 ---

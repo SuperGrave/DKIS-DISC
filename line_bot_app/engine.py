@@ -22,6 +22,7 @@ from .tool_notice import (
     show_normal_footer,
     show_retry_notice,
 )
+from .user_messages import MSG_REPLY_ASSEMBLY_FAILED, MSG_UNKNOWN_COMMAND
 
 
 def _usage_from_response(response: object) -> dict:
@@ -164,7 +165,7 @@ class LineBrain:
 
         handler = COMMAND_HANDLERS.get(command)
         if not handler:
-            TEXT_out = f"すみません、そのコマンド（{command}）はこの環境では使えません。"
+            TEXT_out = MSG_UNKNOWN_COMMAND.format(command=command)
             return TEXT_out, False, TEXT_out, TEXT_out, None, None
 
         res = handler(self._svc, args, TEXT, NOTE=NOTE, user_id=uid)
@@ -197,7 +198,7 @@ class LineBrain:
         """ユーザーへの送信パートの並び。`on_line_message` があるときは各パートを確定次第コールバック（LINE 逐次送信用）。"""
         text = (user_text or "").strip()
         if not text:
-            msg = "すみません、メッセージが空みたいです。もう一度送ってください。"
+            msg = "メッセージが空のようです。入力内容をご確認ください。"
             empty_parts: list[str] = [msg]
             if on_line_message:
                 for chunk in split_line_text(msg):
@@ -299,7 +300,7 @@ class LineBrain:
         elif footer_line:
             _emit_chunks(on_line_message, footer_line, out_parts=out_parts)
 
-        fallback = "すみません、うまく返答を組み立てられませんでした。"
+        fallback = MSG_REPLY_ASSEMBLY_FAILED
         if not out_parts:
             if on_line_message:
                 for chunk in split_line_text(fallback):
