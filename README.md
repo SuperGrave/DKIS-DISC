@@ -51,7 +51,7 @@ uv run python main.py  # Flask 開発サーバー（`main.py` の app.run）
 
 ```bash
 uv sync
-uv run gunicorn --bind "127.0.0.1:5000" --workers 1 main:app
+uv run gunicorn --workers 1 --threads 2 --bind "127.0.0.1:5000" main:app
 ```
 
 **開発用コンソール（LINE と同じ応答経路）**  
@@ -74,7 +74,7 @@ Webhook を立てずに `AIResponder.reply` を試すときは `uv run python de
 **Render 設定の要点**
 
 - **ビルド**: `uv` を公式インストーラで入れ、`uv sync` で依存解決（`render.yaml` 参照）。
-- **起動**: `gunicorn` で **`main:app`**（`main.py` が `create_app()` を一度だけ生成）。
+- **起動**: `gunicorn` で **`main:app`**、`--workers 1 --threads 2`（`render.yaml` と揃える）。
 - 無料プランはスリープがあり、初回応答が遅れることがあります。
 - `dist/settings.json` を別パスにしたい場合は `DKIS_SETTINGS_PATH` を Render の環境変数に追加する。
 

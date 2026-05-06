@@ -11,6 +11,17 @@ from .news_rss import google_news_search
 from .scrape_page import resolve_news_redirect, scrape_webpage
 from .weather_openmeteo import fetch_weather_report
 
+# Web 由来のツール結果を無制限に載せない（メモリ・コンテキスト爆発防止）。READ-PAGE（trafilatura）優先で効く。
+_WEB_TOOL_TEXT_MAX = 2800
+
+
+def _clamp_web_tool_text(text: str, *, limit: int = _WEB_TOOL_TEXT_MAX) -> str:
+    if not text or len(text) <= limit:
+        return text
+    note = "\n…（Web 由来テキストが長いため切り詰めました）"
+    keep = max(400, limit - len(note))
+    return text[:keep] + note
+
 
 @dataclass
 class CommandServices:
@@ -47,6 +58,7 @@ def cmd_search(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = N
             pass
 
     blob = google_custom_search(svc.config.google_api_key, svc.config.google_cx, query, num=num)
+    blob = _clamp_web_tool_text(blob)
     dmis_log = f"Google検索「{query}」"
     return TEXT or "", dmis_log, blob, blob, None
 
@@ -69,6 +81,7 @@ def cmd_news(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = Non
             pass
 
     blob = google_news_search(query, location=location or None, time_filter=time_filter, max_items=max_items)
+    blob = _clamp_web_tool_text(blob)
     dmis_log = f"ニュース検索「{query}」"
     return TEXT or "", dmis_log, blob, blob, None
 
@@ -107,6 +120,7 @@ def cmd_read_page(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None 
     if raw_text.startswith("エラー:") or raw_text.startswith("本文が抽出できませんでした"):
         return TEXT or "", f"READ-PAGE 失敗: {target}", raw_text, raw_text, None
 
+    raw_text = _clamp_web_tool_text(raw_text)
     dmis_log = f"READ-PAGE: {target}"
     return TEXT or "", dmis_log, raw_text, raw_text, None
 
