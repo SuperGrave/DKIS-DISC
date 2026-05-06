@@ -8,7 +8,7 @@ import random
 
 from linebot.v3.messaging import ApiClient, MessagingApi, PushMessageRequest, TextMessage
 
-from .supabase_store import list_known_line_user_ids_for_push
+from .supabase_store import list_boot_notification_recipient_ids
 
 _VARIANTS: tuple[str, ...] = (
     "あ、お疲れ様ですー。スマホ見てませんでした。",
@@ -29,7 +29,7 @@ def _skip_stored_ids_for_boot_push() -> bool:
 def _merged_boot_recipient_ids() -> list[str]:
     env_raw = (os.environ.get("LINE_BOOT_GREETING_USER_IDS") or "").strip()
     env_ids = [x.strip() for x in env_raw.split(",") if x.strip()]
-    extra = [] if _skip_stored_ids_for_boot_push() else list_known_line_user_ids_for_push()
+    extra = [] if _skip_stored_ids_for_boot_push() else list_boot_notification_recipient_ids()
     seen: set[str] = set()
     merged: list[str] = []
     for uid in env_ids + extra:
@@ -42,10 +42,10 @@ def _merged_boot_recipient_ids() -> list[str]:
 
 def maybe_send_worker_boot_greetings(configuration: object, logger: logging.Logger) -> None:
     """起動時に定型 Push。
-    - ``LINE_BOOT_GREETING_USER_IDS`` …カンマ区切りで明示（任意）
-    - Supabase の ``known_line_users`` …過去に Webhook で観測した userId（任意・上限あり）
+    - ``LINE_BOOT_GREETING_USER_IDS`` …カンマ区切りで明示（運用者向け・任意）
+    - Supabase の ``known_line_users.notify_on_restart=true`` …ユーザーが **SET-SETTING** でオプトインした Id のみ（任意・上限あり）
 
-    LINE が過去ユーザ一覧を返すことはないため **Webhook での記録が前提**。デプロイ直後で一度も誰も話しかけていなければ送り先がありません。
+    LINE が過去ユーザ一覧を返すことはないため **Webhook での記録が前提**。``notify_worker_restart`` をオンにしたユーザーだけ DB 経由で届きます。環境変数の Id はそのままマージされます。
     """
     uids = _merged_boot_recipient_ids()
     if not uids:

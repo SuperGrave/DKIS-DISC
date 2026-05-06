@@ -20,10 +20,12 @@ CREATE TABLE IF NOT EXISTS user_settings (
     setting_value TEXT NOT NULL DEFAULT ''
 );
 
--- LINE が過去ユーザーを一覧しないので、Webhook で見えた userId を記録（起動時 Push の宛先候補）
+-- LINE が過去ユーザーを一覧しないので、Webhook で見えた userId を記録。
+-- notify_on_restart が true のユーザーだけ、ワーカー起動時の定型 Push の宛先になる（オプトイン）。
 CREATE TABLE IF NOT EXISTS known_line_users (
     line_user_id TEXT PRIMARY KEY,
-    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    notify_on_restart BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 -- RLS: anon で公開しない運用なら service_role のみが書き込むので実質問題なし。
@@ -39,3 +41,5 @@ ALTER TABLE memory_files ADD PRIMARY KEY (line_user_id, filename);
 
 ALTER TABLE memory_files ADD COLUMN IF NOT EXISTS content_chars INTEGER NOT NULL DEFAULT 0;
 UPDATE memory_files SET content_chars = length(coalesce(content, ''));
+
+ALTER TABLE known_line_users ADD COLUMN IF NOT EXISTS notify_on_restart BOOLEAN NOT NULL DEFAULT FALSE;

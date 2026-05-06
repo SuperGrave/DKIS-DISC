@@ -16,17 +16,27 @@ from .commands import CommandServices
 from .supabase_store import (
     dumps_memory_index,
     get_db_setting,
+    get_notify_worker_restart,
     memory_append,
     memory_list_files,
     memory_read_row,
     memory_write,
+    normalize_memory_user_id,
     set_db_setting,
+    set_notify_worker_restart,
     validate_memory_filename,
 )
 
 _ALLOWED_SETTING_KEYS = frozenset(
-    {"current_model", "show_ri_text", "tool_notice_display", "text.use_raw_result"}
+    {
+        "current_model",
+        "show_ri_text",
+        "tool_notice_display",
+        "text.use_raw_result",
+        "notify_worker_restart",
+    }
 )
+_PER_USER_SETTING_KEYS = frozenset({"notify_worker_restart"})
 _TOOL_NOTICE_DB_VALUES = frozenset({"full", "abbrev", "minimal", "hidden"})
 
 _TOOL_NOTICE_MODE_HELP: dict[str, str] = {
@@ -185,6 +195,20 @@ def cmd_get_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | Non
         "tool_notice_display": "",
         "text.use_raw_result": "false",
     }
+    if key == "notify_worker_restart":
+        uid = normalize_memory_user_id(user_id or "")
+        if uid == "anonymous":
+            msg = "LINE userId が無いため notify_worker_restart は参照できません。"
+            return (TEXT or "").strip(), "GET-SETTING 拒否", msg, None, None
+        on = get_notify_worker_restart(uid)
+        line = (
+            f"{key} = {'true' if on else 'false'}\n"
+            "オン … ワーカー再起動のたびに定型 Push がこの LINE に届きます。\n"
+            "オフ … DB 経由の起動 Push は届きません（環境変数 LINE_BOOT_GREETING_USER_IDS は別）。\n"
+            "※このキーだけ LINE アカウントごとです（user_settings ではありません）。"
+        )
+        return TEXT or "", f"GET-SETTING {key}", line, None, None
+
     val = get_db_setting(key, defaults.get(key, ""))
     if key == "current_model":
         eff = resolve_chat_model(val, svc.config.openai_model, svc.config.allowed_chat_models)
@@ -206,7 +230,8 @@ def cmd_get_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | Non
         )
     else:
         line = f"{key} = {val!r}"
-    line += "\n※この値はボット全体（すべての LINE ユーザー）で共通です。"
+    if key not in _PER_USER_SETTING_KEYS:
+        line += "\n※この値はボット全体（すべての LINE ユーザー）で共通です。"
     return TEXT or "", f"GET-SETTING {key}", line, None, None
 
 
@@ -218,6 +243,25 @@ def cmd_set_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | Non
     if key not in _ALLOWED_SETTING_KEYS:
         msg = f"key は {_ALLOWED_SETTING_KEYS} のいずれかです。"
         return (TEXT or "").strip(), "SET-SETTING 検証", msg, None, None
+    if key == "notify_worker_restart":
+        uid = normalize_memory_user_id(user_id or "")
+        if uid == "anonymous":
+            msg = "LINE userId が無いため notify_worker_restart は設定できません。"
+            return (TEXT or "").strip(), "SET-SETTING 拒否", msg, None, None
+        vm = val.strip().lower()
+        if vm not in ("true", "false", "1", "0", "yes", "no", "on", "off"):
+            msg = "notify_worker_restart の value は true/false（または 1/0、yes/no、on/off）です。"
+            return (TEXT or "").strip(), "SET-SETTING 拒否", msg, None, None
+        enabled = vm in ("true", "1", "yes", "on")
+        ok, err = set_notify_worker_restart(uid, enabled)
+        if not ok:
+            return (TEXT or "").strip(), "SET-SETTING 失敗", err or "不明なエラー", None, None
+        line = (
+            f"notify_worker_restart を {'オン' if enabled else 'オフ'} にしました。\n"
+            "※この LINE アカウントだけに適用されます（known_line_users）。"
+        )
+        return TEXT or "", f"SET-SETTING {key}", line, None, None
+
     if key == "current_model":
         vm = val.strip()
         if vm and vm not in svc.config.allowed_chat_models:
@@ -243,7 +287,8 @@ def cmd_set_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | Non
         line += f" 実効モードは {eff.value} です。"
     else:
         line += "（値の妥当性はモデル側・運用で確認してください）。"
-    line += "\n※変更はボット全体（すべての LINE ユーザー）に反映されます。"
+    if key not in _PER_USER_SETTING_KEYS:
+        line += "\n※変更はボット全体（すべての LINE ユーザー）に反映されます。"
     return TEXT or "", f"SET-SETTING {key}", line, None, None
 
 

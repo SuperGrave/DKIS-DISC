@@ -1,4 +1,4 @@
-"""Supabase: user_settings（全ユーザー共通）と memory_files（LINE user_id 別）。"""
+"""Supabase: user_settings（全ユーザー共通）、memory_files（LINE user_id 別）、known_line_users（Push 用オプトイン含む）。"""
 
 from __future__ import annotations
 
@@ -103,16 +103,25 @@ def _now_iso() -> str:
 
 
 def remember_line_user_for_push(uid: str | None) -> None:
-    """Webhook で観測した userId を保存（ワーカー起動時 Push の宛先候補）。"""
+    """Webhook で観測した userId を保存。notify_on_restart は既存行があれば維持する。"""
     u = normalize_memory_user_id(uid)
     if u == "anonymous":
         return
     sb = _client()
     if sb is None:
         return
+    notify = False
+    try:
+        r = sb.table("known_line_users").select("notify_on_restart").eq("line_user_id", u).limit(1).execute()
+        rows = r.data or []
+        if rows:
+            v = rows[0].get("notify_on_restart")
+            notify = bool(v) if v is not None else False
+    except Exception:
+        pass
     try:
         sb.table("known_line_users").upsert(
-            {"line_user_id": u, "last_seen_at": _now_iso()},
+            {"line_user_id": u, "last_seen_at": _now_iso(), "notify_on_restart": notify},
             on_conflict="line_user_id",
         ).execute()
     except Exception:
@@ -128,8 +137,8 @@ def _boot_push_store_limit() -> int:
     return max(1, min(n, 2000))
 
 
-def list_known_line_user_ids_for_push() -> list[str]:
-    """Supabase に記録された userId を最近アクティブ順で返す（上限・テーブル未作成時は空）。"""
+def list_boot_notification_recipient_ids() -> list[str]:
+    """notify_on_restart が true の userId を最近アクティブ順で返す（上限・列なし時は空）。"""
     sb = _client()
     if sb is None:
         return []
@@ -138,6 +147,7 @@ def list_known_line_user_ids_for_push() -> list[str]:
         r = (
             sb.table("known_line_users")
             .select("line_user_id")
+            .eq("notify_on_restart", True)
             .order("last_seen_at", desc=True)
             .limit(lim)
             .execute()
@@ -150,6 +160,43 @@ def list_known_line_user_ids_for_push() -> list[str]:
         return out
     except Exception:
         return []
+
+
+def get_notify_worker_restart(uid: str | None) -> bool:
+    """この LINE userId がワーカー起動 Push を受け取るか（known_line_users.notify_on_restart）。"""
+    u = normalize_memory_user_id(uid)
+    if u == "anonymous":
+        return False
+    sb = _client()
+    if sb is None:
+        return False
+    try:
+        r = sb.table("known_line_users").select("notify_on_restart").eq("line_user_id", u).limit(1).execute()
+        rows = r.data or []
+        if not rows:
+            return False
+        v = rows[0].get("notify_on_restart")
+        return bool(v) if v is not None else False
+    except Exception:
+        return False
+
+
+def set_notify_worker_restart(uid: str | None, enabled: bool) -> tuple[bool, str]:
+    """known_line_users に upsert し、notify_on_restart を設定する。"""
+    u = normalize_memory_user_id(uid)
+    if u == "anonymous":
+        return False, "LINE userId が無いため設定できません。"
+    sb = _client()
+    if sb is None:
+        return False, "Supabase が未設定です（SUPABASE_URL / SUPABASE_KEY）。"
+    try:
+        sb.table("known_line_users").upsert(
+            {"line_user_id": u, "last_seen_at": _now_iso(), "notify_on_restart": bool(enabled)},
+            on_conflict="line_user_id",
+        ).execute()
+        return True, ""
+    except Exception as exc:
+        return False, str(exc)
 
 
 def _normalize_list_row(row: dict[str, Any]) -> dict[str, Any]:
