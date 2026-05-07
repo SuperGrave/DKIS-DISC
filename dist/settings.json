@@ -40,6 +40,9 @@
     "max_retry_payload_chars": 10000,
     "reset_history_on_prompt_change": false
   },
+  "notifications": {
+    "restart_push_enabled": true
+  },
   "input_format": {
     "main": {
       "mode": "all",

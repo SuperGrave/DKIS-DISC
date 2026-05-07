@@ -37,6 +37,14 @@ _ALLOWED_SETTING_KEYS = frozenset(
     }
 )
 _PER_USER_SETTING_KEYS = frozenset({"notify_worker_restart"})
+_AGGREGATE_SETTING_KEYS = frozenset(("*", "all"))
+_ALL_SETTING_KEYS_ORDER: tuple[str, ...] = (
+    "current_model",
+    "tool_notice_display",
+    "show_ri_text",
+    "text.use_raw_result",
+    "notify_worker_restart",
+)
 _TOOL_NOTICE_DB_VALUES = frozenset({"full", "abbrev", "minimal", "hidden"})
 
 _TOOL_NOTICE_MODE_HELP: dict[str, str] = {
@@ -182,13 +190,8 @@ def cmd_save_log_supabase(svc: CommandServices, args: dict, TEXT: str, NOTE: str
     return TEXT or "", ok, ok, ok, None
 
 
-def cmd_get_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None, *, user_id=None):
-    if not isinstance(args, dict):
-        args = {}
-    key = str(args.get("key") or "").strip()
-    if key not in _ALLOWED_SETTING_KEYS:
-        msg = f"key は {_ALLOWED_SETTING_KEYS} のいずれかです。"
-        return (TEXT or "").strip(), "GET-SETTING 検証", msg, None, None
+def _format_setting_block(svc: CommandServices, key: str, user_id: str | None) -> str:
+    """単一キーの説明テキスト（GET-SETTING の本文）。"""
     defaults = {
         "current_model": svc.config.openai_model,
         "show_ri_text": "true",
@@ -198,16 +201,25 @@ def cmd_get_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | Non
     if key == "notify_worker_restart":
         uid = normalize_memory_user_id(user_id or "")
         if uid == "anonymous":
-            msg = "LINE userId が無いため notify_worker_restart は参照できません。"
-            return (TEXT or "").strip(), "GET-SETTING 拒否", msg, None, None
+            return (
+                "参照できません: LINE userId がありません。\n"
+                "このキーは known_line_users（この LINE アカウント単位）に保存されます。"
+            )
         on = get_notify_worker_restart(uid)
-        line = (
-            f"{key} = {'true' if on else 'false'}\n"
-            "オン … ワーカー再起動のたびに定型 Push がこの LINE に届きます。\n"
-            "オフ … DB 経由の起動 Push は届きません（環境変数 LINE_BOOT_GREETING_USER_IDS は別）。\n"
+        if svc.config.restart_push_enabled:
+            srv = "オン … settings.json の notifications.restart_push_enabled が true で、再起動時の定型 Push を送れます。"
+        else:
+            srv = (
+                "オフ … notifications.restart_push_enabled=false のため、"
+                "再起動時の定型 Push は全宛先について送られません（LINE_BOOT_GREETING_USER_IDS も含む）。"
+            )
+        return (
+            f"{key} = {'true' if on else 'false'}（この LINE のオプトイン）\n"
+            f"サーバー: {srv}\n"
+            "ユーザーがオンでもサーバーがオフなら送信されません。\n"
+            "ユーザーがオフなら、このアカウントへの DB 登録による宛先には送られません。\n"
             "※このキーだけ LINE アカウントごとです（user_settings ではありません）。"
         )
-        return TEXT or "", f"GET-SETTING {key}", line, None, None
 
     val = get_db_setting(key, defaults.get(key, ""))
     if key == "current_model":
@@ -232,6 +244,35 @@ def cmd_get_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | Non
         line = f"{key} = {val!r}"
     if key not in _PER_USER_SETTING_KEYS:
         line += "\n※この値はボット全体（すべての LINE ユーザー）で共通です。"
+    return line
+
+
+def cmd_get_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None, *, user_id=None):
+    if not isinstance(args, dict):
+        args = {}
+    key_raw = str(args.get("key") or "").strip()
+    key_lc = key_raw.lower()
+
+    if key_lc in _AGGREGATE_SETTING_KEYS:
+        blocks = [_format_setting_block(svc, k, user_id) for k in _ALL_SETTING_KEYS_ORDER]
+        headings = [f"【{k}】" for k in _ALL_SETTING_KEYS_ORDER]
+        inner = "\n\n---\n\n".join(f"{h}\n{b}" for h, b in zip(headings, blocks, strict=True))
+        line = "（GET-SETTING 一括・全キー）\n\n" + inner
+        return TEXT or "", "GET-SETTING (all)", line, None, None
+
+    key = key_raw
+    if key not in _ALLOWED_SETTING_KEYS:
+        msg = (
+            f"key は {_ALLOWED_SETTING_KEYS} のいずれか、"
+            "または一覧取得のとき `*` / `all` です。"
+        )
+        return (TEXT or "").strip(), "GET-SETTING 検証", msg, None, None
+
+    if key == "notify_worker_restart" and normalize_memory_user_id(user_id or "") == "anonymous":
+        line = _format_setting_block(svc, key, user_id)
+        return (TEXT or "").strip(), "GET-SETTING 拒否", line, None, None
+
+    line = _format_setting_block(svc, key, user_id)
     return TEXT or "", f"GET-SETTING {key}", line, None, None
 
 
@@ -260,6 +301,11 @@ def cmd_set_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | Non
             f"notify_worker_restart を {'オン' if enabled else 'オフ'} にしました。\n"
             "※この LINE アカウントだけに適用されます（known_line_users）。"
         )
+        if not svc.config.restart_push_enabled:
+            line += (
+                "\n（注: notifications.restart_push_enabled=false のため、"
+                "再起動時の定型 Push はサーバーから送られません。）"
+            )
         return TEXT or "", f"SET-SETTING {key}", line, None, None
 
     if key == "current_model":

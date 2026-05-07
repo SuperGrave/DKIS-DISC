@@ -59,6 +59,9 @@ def _rt_arg_summary(command: str, args: object) -> str:
         fn = str(args.get("filename") or "").strip()
         return (fn[:120] + "…") if len(fn) > 120 else (fn or "(filenameなし)")
     if command == "GET-SETTING":
+        k = str(args.get("key") or "").strip().lower()
+        if k in ("*", "all"):
+            return "(all)"
         return str(args.get("key") or "(key)")
     if command == "SET-SETTING":
         k = str(args.get("key") or "")

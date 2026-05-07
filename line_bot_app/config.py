@@ -22,6 +22,7 @@ class AppConfig:
     input_main: InputFormatMain
     google_api_key: str | None
     google_cx: str | None
+    restart_push_enabled: bool
 
 
 _DEV_CONSOLE_LINE_PLACEHOLDER = "unused-dev-console"
@@ -79,4 +80,5 @@ def load_config(
         input_main=js.input_main,
         google_api_key=(os.environ.get("GOOGLE_API_KEY") or "").strip() or None,
         google_cx=(os.environ.get("GOOGLE_CX") or "").strip() or None,
+        restart_push_enabled=js.restart_push_enabled,
     )

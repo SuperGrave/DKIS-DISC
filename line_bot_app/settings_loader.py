@@ -33,6 +33,7 @@ class JsonSettings:
     news_max_items: int
     weather_api_timeout: float
     input_main: InputFormatMain
+    restart_push_enabled: bool
 
 
 def resolve_settings_path() -> Path:
@@ -75,6 +76,7 @@ def load_json_settings() -> JsonSettings:
     search = raw.get("search") or {}
     news = raw.get("news") or {}
     weather = raw.get("weather") or {}
+    notifications = raw.get("notifications") or {}
     system_prompts = raw.get("system_prompts") or {}
     input_fmt = raw.get("input_format") or {}
     main_if = input_fmt.get("main") or {}
@@ -115,6 +117,8 @@ def load_json_settings() -> JsonSettings:
     main_model = resolve_chat_model(main_raw, DEFAULT_CHAT_MODEL, allowed_chat_models)
     allowed_chat_models = allowed_chat_models | {main_model}
 
+    restart_push_enabled = bool(notifications.get("restart_push_enabled", True))
+
     return JsonSettings(
         path=path,
         system_prompt_main=prompt_main,
@@ -127,4 +131,5 @@ def load_json_settings() -> JsonSettings:
         news_max_items=max(1, min(50, int(news.get("max_items", 10)))),
         weather_api_timeout=float(weather.get("api_timeout", 12)),
         input_main=input_main,
+        restart_push_enabled=restart_push_enabled,
     )

@@ -42,7 +42,11 @@ def create_app() -> Flask:
     brain = AIResponder(config)
 
     if line_ready:
-        maybe_send_worker_boot_greetings(line_configuration, app.logger)
+        maybe_send_worker_boot_greetings(
+            line_configuration,
+            app.logger,
+            restart_push_enabled=config.restart_push_enabled,
+        )
 
     @app.get("/")
     def health_check():

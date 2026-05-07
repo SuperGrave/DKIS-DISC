@@ -180,7 +180,12 @@ def _merged_boot_recipient_ids() -> list[str]:
     return merged
 
 
-def maybe_send_worker_boot_greetings(configuration: object, logger: logging.Logger) -> None:
+def maybe_send_worker_boot_greetings(
+    configuration: object,
+    logger: logging.Logger,
+    *,
+    restart_push_enabled: bool = True,
+) -> None:
     """起動時に定型 Push。
     - ``LINE_BOOT_GREETING_USER_IDS`` …カンマ区切りで明示（運用者向け・任意）
     - Supabase の ``known_line_users.notify_on_restart=true`` …ユーザーが **SET-SETTING** でオプトインした Id のみ（任意・上限あり）
@@ -188,7 +193,12 @@ def maybe_send_worker_boot_greetings(configuration: object, logger: logging.Logg
     LINE が過去ユーザ一覧を返すことはないため **Webhook での記録が前提**。``notify_worker_restart`` をオンにしたユーザーだけ DB 経由で届きます。環境変数の Id はそのままマージされます。
 
     ``notify_worker_restart`` のユーザーへ届いた本文は、そのユーザーからの **次の 1 回の応答生成** で OpenAI 用履歴の先頭に assistant として差し込みます（文脈用・その後は通常どおり蓄積）。
+
+    ``restart_push_enabled`` が False のとき（``dist/settings.json`` の ``notifications.restart_push_enabled``）は、環境変数で宛先が指定されていても **送信しません**（運用側で一括オフ）。
     """
+    if not restart_push_enabled:
+        logger.info("LINE boot greeting skipped (notifications.restart_push_enabled=false)")
+        return
     uids = _merged_boot_recipient_ids()
     if not uids:
         return
