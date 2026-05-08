@@ -10,10 +10,10 @@ from linebot.v3.messaging import (
     ApiClient,
     Configuration,
     MessagingApi,
-    PushMessageRequest,
     ReplyMessageRequest,
     TextMessage,
 )
+from linebot.v3.messaging.exceptions import ApiException
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
 from .ai import AIResponder
@@ -79,51 +79,39 @@ def create_app() -> Flask:
 
         with ApiClient(line_configuration) as api_client:
             api = MessagingApi(api_client)
-            reply_pending = True
-
-            def send_line(text: str) -> None:
-                nonlocal reply_pending
-                msgs = [TextMessage(text=text)]
-                if reply_pending:
-                    api.reply_message(
-                        ReplyMessageRequest(
-                            reply_token=event.reply_token,
-                            messages=msgs,
-                        )
-                    )
-                    reply_pending = False
-                elif use_push:
-                    api.push_message(PushMessageRequest(to=uid, messages=msgs))
-
             try:
-                if use_push:
-                    brain.reply(uid, user_text, on_line_message=send_line)
-                else:
-                    reply_parts = brain.reply(uid, user_text)
-                    messages = [
-                        TextMessage(text=chunk) for chunk in flatten_reply_parts(reply_parts)
-                    ]
+                # reply_message は1リクエストで最大5通まで。逐次 push にすると Push 無料枠を枯渇しやすい。
+                reply_parts = brain.reply(uid, user_text)
+                messages = [
+                    TextMessage(text=chunk) for chunk in flatten_reply_parts(reply_parts)
+                ]
+                api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=messages,
+                    )
+                )
+            except ApiException as exc:
+                app.logger.error("LINE Messaging API error: %s", exc, exc_info=True)
+                try:
                     api.reply_message(
                         ReplyMessageRequest(
                             reply_token=event.reply_token,
-                            messages=messages,
+                            messages=[TextMessage(text=MSG_SYSTEM_FAILURE)],
                         )
                     )
-            except Exception:
-                app.logger.exception("OpenAI reply generation failed")
-                err = MSG_SYSTEM_FAILURE
-                try:
-                    msgs = [TextMessage(text=err)]
-                    if reply_pending:
-                        api.reply_message(
-                            ReplyMessageRequest(
-                                reply_token=event.reply_token,
-                                messages=msgs,
-                            )
-                        )
-                    elif use_push:
-                        api.push_message(PushMessageRequest(to=uid, messages=msgs))
                 except Exception:
-                    app.logger.exception("LINE error notify failed")
+                    app.logger.exception("LINE error reply (fallback) failed")
+            except Exception:
+                app.logger.exception("AI reply generation or LINE reply failed")
+                try:
+                    api.reply_message(
+                        ReplyMessageRequest(
+                            reply_token=event.reply_token,
+                            messages=[TextMessage(text=MSG_SYSTEM_FAILURE)],
+                        )
+                    )
+                except Exception:
+                    app.logger.exception("LINE error reply (fallback) failed")
 
     return app
