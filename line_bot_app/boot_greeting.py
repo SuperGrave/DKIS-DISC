@@ -10,7 +10,13 @@ from zoneinfo import ZoneInfo
 
 from linebot.v3.messaging import ApiClient, MessagingApi, PushMessageRequest, TextMessage
 
-from .supabase_store import list_boot_notification_recipient_ids
+from .parsing import format_model_response_block
+from .supabase_store import (
+    list_boot_notification_recipient_ids,
+    set_pending_worker_boot_history,
+    supabase_configured,
+    take_pending_worker_boot_history,
+)
 
 # JST の「時」（0〜23）ごとに 2 通り ×24 = 48 種。ひきこもり／インドア寄りの挨拶。
 _BOOT_GREETINGS_BY_HOUR: tuple[tuple[str, str], ...] = (
@@ -116,22 +122,38 @@ _BOOT_GREETINGS_BY_HOUR: tuple[tuple[str, str], ...] = (
 _pending_worker_boot_line_by_uid: dict[str, str] = {}
 
 
-def remember_worker_boot_push_for_history(uid: str, text: str) -> None:
-    """notify_worker_restart 宛に Push した本文を、次の応答生成で履歴へ差し込むために保存する。"""
+def remember_worker_boot_push_for_history(uid: str, line_visible_text: str) -> None:
+    """notify_worker_restart 宛に Push した本文を、次の応答生成で履歴へ差し込むために保存する。
+
+    平文のままでは後続ターンの出力形式が崩れやすいため、システムプロンプトと同型の SPEAK ブロックで保存する。
+    """
     u = (uid or "").strip()
     if not u or u == "anonymous":
         return
-    t = (text or "").strip()
+    t = (line_visible_text or "").strip()
     if not t:
         return
-    _pending_worker_boot_line_by_uid[u] = t
+    block = format_model_response_block(
+        t,
+        note="ワーカー起動後の定型あいさつ（LINE に届いた発話と同じ本文）。",
+    )
+    if supabase_configured():
+        set_pending_worker_boot_history(u, block)
+    else:
+        _pending_worker_boot_line_by_uid[u] = block
 
 
 def take_worker_boot_push_for_history(uid: str) -> str | None:
-    """保存済みの起動 Push 本文があれば取り出して削除する（1 回限り・assistant 行として使う）。"""
+    """保存済みの assistant ブロックがあれば取り出して削除する（1 回限り）。"""
     u = (uid or "").strip()
     if not u or u == "anonymous":
         return None
+    if supabase_configured():
+        got = take_pending_worker_boot_history(u)
+        if got:
+            s = got.strip()
+            if s:
+                return s
     line = _pending_worker_boot_line_by_uid.pop(u, None)
     if not line:
         return None
@@ -192,7 +214,9 @@ def maybe_send_worker_boot_greetings(
 
     LINE が過去ユーザ一覧を返すことはないため **Webhook での記録が前提**。``notify_worker_restart`` をオンにしたユーザーだけ DB 経由で届きます。環境変数の Id はそのままマージされます。
 
-    ``notify_worker_restart`` のユーザーへ届いた本文は、そのユーザーからの **次の 1 回の応答生成** で OpenAI 用履歴の先頭に assistant として差し込みます（文脈用・その後は通常どおり蓄積）。
+    ``notify_worker_restart`` のユーザーへ届いた本文は、そのユーザーからの **次の 1 回の応答生成** で
+    OpenAI 用履歴の先頭に assistant として差し込みます。差し込み内容は LINE 本文と同じ発話を含む
+    **SPEAK 形式のブロック**（Supabase ``known_line_users.pending_worker_boot_history`` に保持しワーカー間で共有）です。
 
     ``restart_push_enabled`` が False のとき（``dist/settings.json`` の ``notifications.restart_push_enabled``）は、環境変数で宛先が指定されていても **送信しません**（運用側で一括オフ）。
     """

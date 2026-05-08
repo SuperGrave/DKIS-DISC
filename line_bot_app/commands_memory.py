@@ -1,4 +1,4 @@
-"""Supabase 記憶コマンド（LIST-FILES / READ-TEXT / WRITE-TEXT / APPEND-TEXT / SAVE-LOG / GET-SETTING / SET-SETTING）。"""
+"""Supabase 記憶コマンド（LIST-FILES / READ-TEXT / WRITE-TEXT / APPEND-TEXT / GET-SETTING / SET-SETTING）。"""
 
 from __future__ import annotations
 
@@ -37,7 +37,6 @@ _ALLOWED_SETTING_KEYS = frozenset(
     }
 )
 _PER_USER_SETTING_KEYS = frozenset({"notify_worker_restart"})
-_AGGREGATE_SETTING_KEYS = frozenset(("*", "all"))
 _ALL_SETTING_KEYS_ORDER: tuple[str, ...] = (
     "current_model",
     "tool_notice_display",
@@ -168,28 +167,6 @@ def cmd_append_text(svc: CommandServices, args: dict, TEXT: str, NOTE: str | Non
     return TEXT or "", ok, ok, ok, None
 
 
-def cmd_save_log_supabase(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None, *, user_id=None):
-    uid = user_id or "anonymous"
-    if not isinstance(args, dict):
-        args = {}
-    fn = str(args.get("filename") or "").strip()
-    description = str(args.get("description") or "会話ログのエクスポート").strip()
-    if validate_memory_filename(fn) is None:
-        msg = "filename が不正か空です。"
-        return (TEXT or "").strip(), "SAVE-LOG 検証エラー", msg, None, None
-
-    body = svc.hooks.take_clear_log(uid)
-    if not body.strip():
-        msg = "保存する会話ログが空です（このユーザーでまだメッセージが蓄積されていません）。"
-        return (TEXT or "").strip(), "SAVE-LOG: 空", msg, None, None
-
-    err = memory_write(fn, body, description, uid)
-    if err:
-        return (TEXT or "").strip(), "SAVE-LOG 失敗", err, None, None
-    ok = f"SAVE-LOG 完了: {fn}（ログバッファをクリアしました）"
-    return TEXT or "", ok, ok, ok, None
-
-
 def _format_setting_block(svc: CommandServices, key: str, user_id: str | None) -> str:
     """単一キーの説明テキスト（GET-SETTING の本文）。"""
     defaults = {
@@ -248,32 +225,12 @@ def _format_setting_block(svc: CommandServices, key: str, user_id: str | None) -
 
 
 def cmd_get_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None, *, user_id=None):
-    if not isinstance(args, dict):
-        args = {}
-    key_raw = str(args.get("key") or "").strip()
-    key_lc = key_raw.lower()
-
-    if key_lc in _AGGREGATE_SETTING_KEYS:
-        blocks = [_format_setting_block(svc, k, user_id) for k in _ALL_SETTING_KEYS_ORDER]
-        headings = [f"【{k}】" for k in _ALL_SETTING_KEYS_ORDER]
-        inner = "\n\n---\n\n".join(f"{h}\n{b}" for h, b in zip(headings, blocks, strict=True))
-        line = "（GET-SETTING 一括・全キー）\n\n" + inner
-        return TEXT or "", "GET-SETTING (all)", line, None, None
-
-    key = key_raw
-    if key not in _ALLOWED_SETTING_KEYS:
-        msg = (
-            f"key は {_ALLOWED_SETTING_KEYS} のいずれか、"
-            "または一覧取得のとき `*` / `all` です。"
-        )
-        return (TEXT or "").strip(), "GET-SETTING 検証", msg, None, None
-
-    if key == "notify_worker_restart" and normalize_memory_user_id(user_id or "") == "anonymous":
-        line = _format_setting_block(svc, key, user_id)
-        return (TEXT or "").strip(), "GET-SETTING 拒否", line, None, None
-
-    line = _format_setting_block(svc, key, user_id)
-    return TEXT or "", f"GET-SETTING {key}", line, None, None
+    """常に全設定キーをまとめて返す（ARGS の key は無視）。"""
+    blocks = [_format_setting_block(svc, k, user_id) for k in _ALL_SETTING_KEYS_ORDER]
+    headings = [f"【{k}】" for k in _ALL_SETTING_KEYS_ORDER]
+    inner = "\n\n---\n\n".join(f"{h}\n{b}" for h, b in zip(headings, blocks, strict=True))
+    line = "（GET-SETTING 全項目）\n\n" + inner
+    return TEXT or "", "GET-SETTING (all)", line, None, None
 
 
 def cmd_set_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None, *, user_id=None):
@@ -343,7 +300,6 @@ MEMORY_COMMAND_HANDLERS: dict[str, Any] = {
     "READ-TEXT": cmd_read_text,
     "WRITE-TEXT": cmd_write_text,
     "APPEND-TEXT": cmd_append_text,
-    "SAVE-LOG": cmd_save_log_supabase,
     "GET-SETTING": cmd_get_setting,
     "SET-SETTING": cmd_set_setting,
 }

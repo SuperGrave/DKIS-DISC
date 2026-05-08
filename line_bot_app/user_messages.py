@@ -12,6 +12,12 @@ MSG_EMPTY_REPLY = MSG_SYSTEM_FAILURE
 # モデルがツール結果から本文を組み立てられなかったとき
 MSG_REPLY_ASSEMBLY_FAILED = MSG_SYSTEM_FAILURE
 
+# モデル出力が [CMD] ブロックとして解釈できなかったとき
+MSG_AI_OUTPUT_PARSE_FAILED = (
+    "申し訳ありません、今の応答の形をうまく読み取れませんでした。"
+    "キリタンが少し噛んじゃったみたいです。もう一度だけ送ってもらえますか。"
+)
+
 # 未実装コマンド等（環境・設定側）
 MSG_UNKNOWN_COMMAND = (
     "申し訳ありません、その操作はこの環境ではできません（CMD: {command}）。"

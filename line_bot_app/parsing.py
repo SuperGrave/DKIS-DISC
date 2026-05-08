@@ -6,6 +6,18 @@ import json
 import re
 
 
+def format_model_response_block(text: str, *, note: str = "雑談と判断。発話のみ。") -> str:
+    """履歴用など、モデル出力と同型の SPEAK ブロックを組み立てる。"""
+    t = text or ""
+    return (
+        "[CMD]SPEAK\n"
+        "[ARGS]none\n"
+        '[ARGS-2]{"retry": false}\n'
+        f"[NOTE]{note}\n"
+        f"[TEXT]{t}"
+    )
+
+
 def parse_ai_response(text: str) -> dict:
     """
     生テキストからタグを抽出する。
@@ -22,6 +34,7 @@ def parse_ai_response(text: str) -> dict:
         "NOTE": "",
     }
 
+    explicit_cmd = False
     lines = text.splitlines()
     i = 0
     while i < len(lines):
@@ -51,9 +64,13 @@ def parse_ai_response(text: str) -> dict:
                     parsed[key] = json.loads(first)
                 except Exception:
                     parsed[key] = {}
-        else:
-            parsed[key] = first.strip().upper() if first else None
+            i += 1
+            continue
 
+        val = first.strip().upper() if first else None
+        parsed[key] = val
+        if key in ("CMD", "COMMAND") and val:
+            explicit_cmd = True
         i += 1
 
     if not parsed.get("CMD") and parsed.get("COMMAND"):
@@ -70,4 +87,5 @@ def parse_ai_response(text: str) -> dict:
     if parsed.get("NOTE"):
         parsed["NOTE"] = re.sub(r"\[\s*\]$", "", parsed["NOTE"]).strip()
 
+    parsed["__dkis_parse_ok__"] = explicit_cmd
     return parsed

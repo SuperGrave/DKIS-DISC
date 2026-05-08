@@ -181,6 +181,82 @@ def get_notify_worker_restart(uid: str | None) -> bool:
         return False
 
 
+_MAX_PENDING_BOOT_HISTORY_CHARS = 12_000
+
+
+def set_pending_worker_boot_history(uid: str | None, assistant_history_block: str) -> None:
+    """起動 Push 直後、そのユーザー次回応答用に assistant 履歴ブロックを保存（ワーカー間共有）。"""
+    u = normalize_memory_user_id(uid)
+    if u == "anonymous":
+        return
+    block = (assistant_history_block or "").strip()
+    if not block:
+        return
+    if len(block) > _MAX_PENDING_BOOT_HISTORY_CHARS:
+        block = block[: _MAX_PENDING_BOOT_HISTORY_CHARS - 40] + "\n…（省略）"
+    sb = _client()
+    if sb is None:
+        return
+    notify = False
+    try:
+        r = sb.table("known_line_users").select("notify_on_restart").eq("line_user_id", u).limit(1).execute()
+        rows = r.data or []
+        if rows:
+            v = rows[0].get("notify_on_restart")
+            notify = bool(v) if v is not None else False
+    except Exception:
+        pass
+    try:
+        sb.table("known_line_users").upsert(
+            {
+                "line_user_id": u,
+                "last_seen_at": _now_iso(),
+                "notify_on_restart": notify,
+                "pending_worker_boot_history": block,
+            },
+            on_conflict="line_user_id",
+        ).execute()
+    except Exception:
+        pass
+
+
+def take_pending_worker_boot_history(uid: str | None) -> str | None:
+    """保存済みブロックがあれば返し、列を空にする（1 回限り）。"""
+    u = normalize_memory_user_id(uid)
+    if u == "anonymous":
+        return None
+    sb = _client()
+    if sb is None:
+        return None
+    try:
+        r = (
+            sb.table("known_line_users")
+            .select("pending_worker_boot_history")
+            .eq("line_user_id", u)
+            .limit(1)
+            .execute()
+        )
+        rows = r.data or []
+        if not rows:
+            return None
+        val = rows[0].get("pending_worker_boot_history")
+        if val is None:
+            return None
+        s = str(val).strip()
+        if not s:
+            try:
+                sb.table("known_line_users").update({"pending_worker_boot_history": None}).eq(
+                    "line_user_id", u
+                ).execute()
+            except Exception:
+                pass
+            return None
+        sb.table("known_line_users").update({"pending_worker_boot_history": None}).eq("line_user_id", u).execute()
+        return s
+    except Exception:
+        return None
+
+
 def set_notify_worker_restart(uid: str | None, enabled: bool) -> tuple[bool, str]:
     """known_line_users に upsert し、notify_on_restart を設定する。"""
     u = normalize_memory_user_id(uid)

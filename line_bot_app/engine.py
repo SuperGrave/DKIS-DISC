@@ -12,7 +12,7 @@ from .commands import COMMAND_HANDLERS, CommandServices, ExportHooks
 from .config import AppConfig
 from .input_build import build_input_segments
 from .line_messages import split_line_text
-from .parsing import parse_ai_response
+from .parsing import format_model_response_block, parse_ai_response
 from .supabase_store import get_db_setting
 from .tool_notice import (
     ToolNoticeMode,
@@ -23,7 +23,11 @@ from .tool_notice import (
     show_normal_footer,
     show_retry_notice,
 )
-from .user_messages import MSG_REPLY_ASSEMBLY_FAILED, MSG_UNKNOWN_COMMAND
+from .user_messages import (
+    MSG_AI_OUTPUT_PARSE_FAILED,
+    MSG_REPLY_ASSEMBLY_FAILED,
+    MSG_UNKNOWN_COMMAND,
+)
 
 
 def _usage_from_response(response: object) -> dict:
@@ -55,14 +59,11 @@ def _rt_arg_summary(command: str, args: object) -> str:
         return (u[:120] + "…") if len(u) > 120 else (u or "(urlなし)")
     if command == "LIST-FILES":
         return "(一覧)"
-    if command in ("READ-TEXT", "WRITE-TEXT", "APPEND-TEXT", "SAVE-LOG"):
+    if command in ("READ-TEXT", "WRITE-TEXT", "APPEND-TEXT"):
         fn = str(args.get("filename") or "").strip()
         return (fn[:120] + "…") if len(fn) > 120 else (fn or "(filenameなし)")
     if command == "GET-SETTING":
-        k = str(args.get("key") or "").strip().lower()
-        if k in ("*", "all"):
-            return "(all)"
-        return str(args.get("key") or "(key)")
+        return "(全設定)"
     if command == "SET-SETTING":
         k = str(args.get("key") or "")
         return (k[:60] + "…") if len(k) > 60 else k or "(key)"
@@ -236,7 +237,23 @@ class LineBrain:
         ai_raw, usage = self._complete(messages)
         self._append_export_log(uid, "ASSISTANT_RAW", ai_raw)
         parsed = parse_ai_response(ai_raw)
-        TEXT, should_retry, dmis_log, summary, raw_result, _tu = self._execute(parsed, uid)
+        parse_ok = bool(parsed.pop("__dkis_parse_ok__", False))
+        if not parse_ok:
+            TEXT = MSG_AI_OUTPUT_PARSE_FAILED.strip()
+            should_retry = False
+            dmis_log = "応答フォーマット異常"
+            summary = TEXT
+            raw_result = None
+            _tu = None
+            parsed = {
+                "CMD": "SPEAK",
+                "ARGS": {},
+                "ARGS_2": {"retry": False},
+                "TEXT": TEXT,
+                "NOTE": "",
+            }
+        else:
+            TEXT, should_retry, dmis_log, summary, raw_result, _tu = self._execute(parsed, uid)
         self._last_proc_by_user[uid] = dmis_log or "通常会話応答"
 
         if isinstance(raw_result, dict) and raw_result.get("__suppress_followup_retry__"):
@@ -245,7 +262,7 @@ class LineBrain:
         out_parts: list[str] = []
         retry_round = 0
 
-        while should_retry and retry_round < self._config.max_retry_chain:
+        while should_retry and parse_ok and retry_round < self._config.max_retry_chain:
             retry_round += 1
             cmd = (parsed.get("CMD") or "SPEAK").strip().upper()
             detail = _rt_arg_summary(cmd, parsed.get("ARGS"))
@@ -286,14 +303,38 @@ class LineBrain:
             ai_raw, usage = self._complete(messages)
             self._append_export_log(uid, "ASSISTANT_RAW", ai_raw)
             parsed_retry = parse_ai_response(ai_raw)
-            TEXT, should_retry, dmis_log, summary, raw_result, _tu = self._execute(parsed_retry, uid)
-            parsed = parsed_retry
+            parse_ok = bool(parsed_retry.pop("__dkis_parse_ok__", False))
+            if not parse_ok:
+                TEXT = MSG_AI_OUTPUT_PARSE_FAILED.strip()
+                should_retry = False
+                dmis_log = "応答フォーマット異常"
+                summary = TEXT
+                raw_result = None
+                _tu = None
+                parsed = {
+                    "CMD": "SPEAK",
+                    "ARGS": {},
+                    "ARGS_2": {"retry": False},
+                    "TEXT": TEXT,
+                    "NOTE": "",
+                }
+            else:
+                TEXT, should_retry, dmis_log, summary, raw_result, _tu = self._execute(parsed_retry, uid)
+                parsed = parsed_retry
             self._last_proc_by_user[uid] = dmis_log or "通常会話応答"
 
             if isinstance(raw_result, dict) and raw_result.get("__suppress_followup_retry__"):
                 should_retry = False
 
-        messages.append({"role": "assistant", "content": ai_raw})
+        assistant_hist = (
+            format_model_response_block(
+                (TEXT or "").strip(),
+                note="（応答ブロックの解析に失敗したため定型文を返しています）",
+            )
+            if not parse_ok
+            else ai_raw
+        )
+        messages.append({"role": "assistant", "content": assistant_hist})
         self._trim(messages)
 
         final_text = (TEXT or "").strip()

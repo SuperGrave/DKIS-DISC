@@ -46,7 +46,6 @@ _CMD_LABEL_JP: dict[str, str] = {
     "READ-TEXT": "読取",
     "WRITE-TEXT": "記述",
     "APPEND-TEXT": "追記",
-    "SAVE-LOG": "保存",
     "GET-SETTING": "取得",
     "SET-SETTING": "更新",
 }
