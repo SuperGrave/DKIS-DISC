@@ -1,4 +1,4 @@
-"""開発用: LINE Webhook と同じ AIResponder(LineBrain).reply 経路をコンソールで試す。
+"""開発用: Discord bot と同じ AIResponder(LineBrain).reply 経路をコンソールで試す。
 
 本番デプロイ前に削除してください。
 """
@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from line_bot_app.ai import AIResponder
 from line_bot_app.config import load_config
 
-# LINE 上の user_id に相当（履歴はこの ID で区切られる）
+# Discord 上の user_id に相当（履歴はこの ID で区切られる）
 _CONSOLE_USER_ID = "console-dev"
 _PROJECT_ROOT = Path(__file__).resolve().parent
 
@@ -35,11 +35,11 @@ def main() -> None:
         print(f"  1. 次のフォルダで実行しているか確認（ここに pyproject.toml と .env がある想定）:")
         print(f"     {_PROJECT_ROOT}")
         print("  2. .env に OPENAI_API_KEY=（イコールの右にキーを貼り付け）を記入。")
-        print("     （開発コンソールでは LINE の値は不要。Webhook / main.py では必須。）")
+        print("     （開発コンソールでは Discord の値は不要。main.py では必須。）")
         sys.exit(1)
     brain = AIResponder(config)
 
-    print("DKIS-LL 開発コンソール（LINE と同じ応答生成経路）")
+    print("DKIS-DISC 開発コンソール（Discord と同じ応答生成経路）")
     print("終了: quit / exit / q / Ctrl+D / Ctrl+C")
     print("-" * 52)
 

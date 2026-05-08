@@ -1,15 +1,13 @@
 [project]
-name = "dkis-ll"
-version = "0.12.1"
-description = "DKIS-LL — LINE上で動作するDKIS互換の軽量AIボット（Flask Webhook + OpenAI + ツール連携）。Web UI・音声・メディア再生なし。"
+name = "dkis-disc"
+version = "1.0.0"
+description = "DKIS-DISC — Discord上で動作するDKIS互換の軽量AIボット（discord.py + OpenAI + ツール連携）。Web UI・音声・メディア再生なし。"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    # Web フレームワーク
-    "flask>=3.0.0",
+    # Discord bot
+    "discord.py>=2.6.0",
     # AI / API クライアント
-    "gunicorn>=25.3.0",
-    "line-bot-sdk>=3.23.0",
     "openai>=1.0.0",
     "python-dotenv>=1.2.2",
     # HTTP / 本文抽出（検索・サイト参照）

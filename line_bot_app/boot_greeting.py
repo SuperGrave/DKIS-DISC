@@ -8,8 +8,6 @@ import random
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from linebot.v3.messaging import ApiClient, MessagingApi, PushMessageRequest, TextMessage
-
 from .parsing import format_model_response_block
 from .supabase_store import (
     list_boot_notification_recipient_ids,
@@ -135,7 +133,7 @@ def remember_worker_boot_push_for_history(uid: str, line_visible_text: str) -> N
         return
     block = format_model_response_block(
         t,
-        note="ワーカー起動後の定型あいさつ（LINE に届いた発話と同じ本文）。",
+        note="ワーカー起動後の定型あいさつ（Discord に届いた発話と同じ本文）。",
     )
     if supabase_configured():
         set_pending_worker_boot_history(u, block)
@@ -173,7 +171,7 @@ def pick_worker_boot_greeting_text() -> str:
 
 
 def _skip_stored_ids_for_boot_push() -> bool:
-    return (os.environ.get("LINE_BOOT_GREETING_SKIP_STORED_IDS") or "").strip().lower() in (
+    return (os.environ.get("DISCORD_BOOT_GREETING_SKIP_STORED_IDS") or "").strip().lower() in (
         "1",
         "true",
         "yes",
@@ -189,7 +187,7 @@ def _boot_push_subscriber_ids() -> set[str]:
 
 
 def _merged_boot_recipient_ids() -> list[str]:
-    env_raw = (os.environ.get("LINE_BOOT_GREETING_USER_IDS") or "").strip()
+    env_raw = (os.environ.get("DISCORD_BOOT_GREETING_USER_IDS") or "").strip()
     env_ids = [x.strip() for x in env_raw.split(",") if x.strip()]
     extra = [] if _skip_stored_ids_for_boot_push() else list_boot_notification_recipient_ids()
     seen: set[str] = set()
@@ -202,44 +200,47 @@ def _merged_boot_recipient_ids() -> list[str]:
     return merged
 
 
+def remember_discord_boot_greeting_for_subscribers(text: str, logger: logging.Logger) -> None:
+    """DB オプトイン済みユーザーの次回履歴へ、起動あいさつを 1 回だけ差し込む。"""
+    sent = 0
+    for uid in _boot_push_subscriber_ids():
+        try:
+            remember_worker_boot_push_for_history(uid, text)
+            sent += 1
+        except Exception:
+            logger.exception("Discord boot greeting history store failed for one recipient")
+    if sent:
+        logger.info("Discord boot greeting stored for %d subscriber(s)", sent)
+
+
+def maybe_build_worker_boot_greeting(
+    logger: logging.Logger,
+    *,
+    restart_push_enabled: bool = True,
+) -> str | None:
+    """起動時に定型 Push。
+    - ``DISCORD_CHANNEL_ID`` …起動時に投稿するチャンネル
+    - Supabase の ``known_line_users.notify_on_restart=true`` …ユーザーが **SET-SETTING** でオプトインした Id のみ（任意・上限あり）
+
+    ``notify_worker_restart`` をオンにしたユーザーへは、次の 1 回の応答生成で
+    OpenAI 用履歴の先頭に assistant として起動あいさつを差し込みます。
+
+    ``restart_push_enabled`` が False のとき（``dist/settings.json`` の ``notifications.restart_push_enabled``）は送信しません。
+    """
+    if not restart_push_enabled:
+        logger.info("Discord boot greeting skipped (notifications.restart_push_enabled=false)")
+        return None
+    text = pick_worker_boot_greeting_text()
+    remember_discord_boot_greeting_for_subscribers(text, logger)
+    return text
+
+
 def maybe_send_worker_boot_greetings(
     configuration: object,
     logger: logging.Logger,
     *,
     restart_push_enabled: bool = True,
 ) -> None:
-    """起動時に定型 Push。
-    - ``LINE_BOOT_GREETING_USER_IDS`` …カンマ区切りで明示（運用者向け・任意）
-    - Supabase の ``known_line_users.notify_on_restart=true`` …ユーザーが **SET-SETTING** でオプトインした Id のみ（任意・上限あり）
-
-    LINE が過去ユーザ一覧を返すことはないため **Webhook での記録が前提**。``notify_worker_restart`` をオンにしたユーザーだけ DB 経由で届きます。環境変数の Id はそのままマージされます。
-
-    ``notify_worker_restart`` のユーザーへ届いた本文は、そのユーザーからの **次の 1 回の応答生成** で
-    OpenAI 用履歴の先頭に assistant として差し込みます。差し込み内容は LINE 本文と同じ発話を含む
-    **SPEAK 形式のブロック**（Supabase ``known_line_users.pending_worker_boot_history`` に保持しワーカー間で共有）です。
-
-    ``restart_push_enabled`` が False のとき（``dist/settings.json`` の ``notifications.restart_push_enabled``）は、環境変数で宛先が指定されていても **送信しません**（運用側で一括オフ）。
-    """
-    if not restart_push_enabled:
-        logger.info("LINE boot greeting skipped (notifications.restart_push_enabled=false)")
-        return
-    uids = _merged_boot_recipient_ids()
-    if not uids:
-        return
-    subscriber_ids = _boot_push_subscriber_ids()
-    text = pick_worker_boot_greeting_text()
-    sent = 0
-    try:
-        with ApiClient(configuration) as api_client:
-            api = MessagingApi(api_client)
-            for uid in uids:
-                try:
-                    api.push_message(PushMessageRequest(to=uid, messages=[TextMessage(text=text)]))
-                    sent += 1
-                    if uid in subscriber_ids:
-                        remember_worker_boot_push_for_history(uid, text)
-                except Exception:
-                    logger.exception("LINE boot greeting push failed for one recipient")
-        logger.info("LINE boot greeting sent to %d recipient(s)", sent)
-    except Exception:
-        logger.exception("LINE boot greeting ApiClient failed")
+    """旧 LINE 入口向けの互換スタブ。Discord 版では `maybe_build_worker_boot_greeting` を使う。"""
+    _ = configuration
+    maybe_build_worker_boot_greeting(logger, restart_push_enabled=restart_push_enabled)

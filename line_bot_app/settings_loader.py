@@ -1,4 +1,4 @@
-"""dist/settings.json を読み込み、LINE ボット実行パラメータを組み立てる。"""
+"""dist/settings.json を読み込み、Discord ボット実行パラメータを組み立てる。"""
 
 from __future__ import annotations
 
@@ -87,7 +87,7 @@ def load_json_settings() -> JsonSettings:
     nl_static = str(main_if.get("nl_static") or "").strip()
     if not nl_static:
         nl_static = (
-            "LINEのためサーバーはGPSを取得できません。"
+            "DiscordのためサーバーはGPSを取得できません。"
             "天気は WEATHER の w_location に、マスターの発話または文脈から特定した具体的地名を必ず入れてください。"
             "地名が断定できないときは WEATHER を実行せず、SPEAK で地名を伺ってください。"
         )

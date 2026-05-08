@@ -6,8 +6,6 @@ from .settings_loader import InputFormatMain, load_json_settings
 
 @dataclass(frozen=True)
 class AppConfig:
-    line_channel_secret: str
-    line_channel_access_token: str
     openai_api_key: str
     settings_source: str
     system_prompt: str
@@ -25,26 +23,20 @@ class AppConfig:
     restart_push_enabled: bool
 
 
-_DEV_CONSOLE_LINE_PLACEHOLDER = "unused-dev-console"
 _OPENAI_PLACEHOLDER = "unused-openai-not-configured"
 
 
 def load_config(
     *, require_line_credentials: bool = True, require_openai: bool = True
 ) -> AppConfig:
-    """Webhook 起動時は LINE の必須変数もチェックする。開発コンソールだけ試すときは False にできる。
+    """Discord 起動時は OpenAI の必須変数をチェックする。開発コンソールだけ試すときは False にできる。
     Render 初回デプロイで ENV が空のときは require_* を False にしプレースホルダで起動できる。"""
+    _ = require_line_credentials
     missing: list[str] = []
     if require_openai:
         missing.extend(
             name
             for name in ("OPENAI_API_KEY",)
-            if not (os.environ.get(name) or "").strip()
-        )
-    if require_line_credentials:
-        missing.extend(
-            name
-            for name in ("LINE_CHANNEL_SECRET", "LINE_CHANNEL_ACCESS_TOKEN")
             if not (os.environ.get(name) or "").strip()
         )
     if missing:
@@ -53,19 +45,11 @@ def load_config(
 
     js = load_json_settings()
 
-    line_secret = (os.environ.get("LINE_CHANNEL_SECRET") or "").strip()
-    line_token = (os.environ.get("LINE_CHANNEL_ACCESS_TOKEN") or "").strip()
-    if not require_line_credentials:
-        line_secret = line_secret or _DEV_CONSOLE_LINE_PLACEHOLDER
-        line_token = line_token or _DEV_CONSOLE_LINE_PLACEHOLDER
-
     openai_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
     if not openai_key and not require_openai:
         openai_key = _OPENAI_PLACEHOLDER
 
     return AppConfig(
-        line_channel_secret=line_secret,
-        line_channel_access_token=line_token,
         openai_api_key=openai_key,
         settings_source=str(js.path),
         system_prompt=js.system_prompt_main,

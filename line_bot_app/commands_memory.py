@@ -214,8 +214,8 @@ def _format_setting_block(svc: CommandServices, key: str, user_id: str | None) -
         uid = normalize_memory_user_id(user_id or "")
         if uid == "anonymous":
             return (
-                "参照できません: LINE userId がありません。\n"
-                "このキーは known_line_users（この LINE アカウント単位）に保存されます。"
+                "参照できません: Discord userId がありません。\n"
+                "このキーは known_line_users（この Discord アカウント単位）に保存されます。"
             )
         on = get_notify_worker_restart(uid)
         if svc.config.restart_push_enabled:
@@ -223,14 +223,14 @@ def _format_setting_block(svc: CommandServices, key: str, user_id: str | None) -
         else:
             srv = (
                 "オフ … notifications.restart_push_enabled=false のため、"
-                "再起動時の定型 Push は全宛先について送られません（LINE_BOOT_GREETING_USER_IDS も含む）。"
+                "再起動時の定型 Push は全宛先について送られません。"
             )
         return (
-            f"{key} = {'true' if on else 'false'}（この LINE のオプトイン）\n"
+            f"{key} = {'true' if on else 'false'}（この Discord のオプトイン）\n"
             f"サーバー: {srv}\n"
             "ユーザーがオンでもサーバーがオフなら送信されません。\n"
             "ユーザーがオフなら、このアカウントへの DB 登録による宛先には送られません。\n"
-            "※このキーだけ LINE アカウントごとです（user_settings ではありません）。"
+            "※このキーだけ Discord アカウントごとです（user_settings ではありません）。"
         )
 
     val = get_db_setting(key, defaults.get(key, ""))
@@ -255,7 +255,7 @@ def _format_setting_block(svc: CommandServices, key: str, user_id: str | None) -
     else:
         line = f"{key} = {val!r}"
     if key not in _PER_USER_SETTING_KEYS:
-        line += "\n※この値はボット全体（すべての LINE ユーザー）で共通です。"
+        line += "\n※この値はボット全体（すべての Discord ユーザー）で共通です。"
     return line
 
 
@@ -279,7 +279,7 @@ def cmd_set_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | Non
     if key == "notify_worker_restart":
         uid = normalize_memory_user_id(user_id or "")
         if uid == "anonymous":
-            msg = "LINE userId が無いため notify_worker_restart は設定できません。"
+            msg = "Discord userId が無いため notify_worker_restart は設定できません。"
             return (TEXT or "").strip(), "SET-SETTING 拒否", msg, None, None
         vm = val.strip().lower()
         if vm not in ("true", "false", "1", "0", "yes", "no", "on", "off"):
@@ -291,7 +291,7 @@ def cmd_set_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | Non
             return (TEXT or "").strip(), "SET-SETTING 失敗", err or "不明なエラー", None, None
         line = (
             f"notify_worker_restart を {'オン' if enabled else 'オフ'} にしました。\n"
-            "※この LINE アカウントだけに適用されます（known_line_users）。"
+            "※この Discord アカウントだけに適用されます（known_line_users）。"
         )
         if not svc.config.restart_push_enabled:
             line += (
@@ -326,7 +326,7 @@ def cmd_set_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | Non
     else:
         line += "（値の妥当性はモデル側・運用で確認してください）。"
     if key not in _PER_USER_SETTING_KEYS:
-        line += "\n※変更はボット全体（すべての LINE ユーザー）に反映されます。"
+        line += "\n※変更はボット全体（すべての Discord ユーザー）に反映されます。"
     return TEXT or "", f"SET-SETTING {key}", line, None, None
 
 

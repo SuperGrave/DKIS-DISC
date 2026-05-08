@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from .user_messages import MSG_EMPTY_REPLY
 
-LINE_TEXT_LIMIT = 5000
+DISCORD_TEXT_LIMIT = 2000
+LINE_TEXT_LIMIT = DISCORD_TEXT_LIMIT
 MAX_REPLY_MESSAGES = 5
 
 
 def split_line_text(text: str, *, max_chunks: int | None = None) -> list[str]:
-    """Split long text into LINE-safe message chunks."""
-    chunk_cap = max_chunks if max_chunks is not None else MAX_REPLY_MESSAGES
-    chunk_cap = max(1, min(chunk_cap, MAX_REPLY_MESSAGES))
+    """Split long text into Discord-safe message chunks."""
+    chunk_cap = max(1, max_chunks) if max_chunks is not None else None
 
     normalized = (text or "").strip()
     if not normalized:
@@ -17,23 +17,23 @@ def split_line_text(text: str, *, max_chunks: int | None = None) -> list[str]:
 
     chunks: list[str] = []
     remaining = normalized
-    while remaining and len(chunks) < chunk_cap:
-        chunk = remaining[:LINE_TEXT_LIMIT]
-        if len(remaining) > LINE_TEXT_LIMIT:
+    while remaining and (chunk_cap is None or len(chunks) < chunk_cap):
+        chunk = remaining[:DISCORD_TEXT_LIMIT]
+        if len(remaining) > DISCORD_TEXT_LIMIT:
             split_at = max(chunk.rfind("\n"), chunk.rfind("。"), chunk.rfind("、"))
-            if split_at > LINE_TEXT_LIMIT * 0.5:
+            if split_at > DISCORD_TEXT_LIMIT * 0.5:
                 chunk = remaining[: split_at + 1]
         chunks.append(chunk.strip())
         remaining = remaining[len(chunk) :].strip()
 
     if remaining and chunks:
-        chunks[-1] = chunks[-1][: LINE_TEXT_LIMIT - 20].rstrip() + "\n...（省略）"
+        chunks[-1] = chunks[-1][: DISCORD_TEXT_LIMIT - 20].rstrip() + "\n...（省略）"
 
     return chunks
 
 
 def flatten_reply_parts(parts: list[str]) -> list[str]:
-    """複数パートを LINE の最大バブル数に収める（長文のみ分割）。"""
+    """旧 LINE 入口向け互換。Discord 入口では split_line_text を直接使う。"""
     cleaned = [(p or "").strip() for p in parts if (p or "").strip()]
     if not cleaned:
         return split_line_text("")

@@ -227,7 +227,7 @@ class LineBrain:
         *,
         on_line_message: Callable[[str], None] | None = None,
     ) -> list[str]:
-        """ユーザーへの送信パートの並び。`on_line_message` があるときは各パートを確定次第コールバック（LINE 逐次送信用）。"""
+        """ユーザーへの送信パートの並び。`on_line_message` があるときは各パートを確定次第コールバックする。"""
         text = (user_text or "").strip()
         if not text:
             msg = "メッセージが空のようです。入力内容をご確認ください。"

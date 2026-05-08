@@ -4,18 +4,17 @@
 
 services:
   - type: web
-    name: dkis-line-bot
+    name: dkis-disc-bot
     runtime: python
     # Python 版は Blueprint では指定不可。ルートの .python-version（3.12）を参照する。
     plan: free
     region: singapore
     buildCommand: uv sync
-    # WEB_CONCURRENCY で増殖しないよう workers は 1 固定。I/O 待ちは threads で軽く並列化。
-    startCommand: uv run gunicorn --workers 1 --threads 2 --bind 0.0.0.0:${PORT:-5000} main:app
+    startCommand: uv run python main.py
     envVars:
-      - key: LINE_CHANNEL_SECRET
+      - key: DISCORD_BOT_TOKEN
         sync: false
-      - key: LINE_CHANNEL_ACCESS_TOKEN
+      - key: DISCORD_CHANNEL_ID
         sync: false
       - key: OPENAI_API_KEY
         sync: false
@@ -23,10 +22,9 @@ services:
         sync: false
       - key: SUPABASE_KEY
         sync: false
-      # ワーカー起動時 Push（任意）。省略時は Supabase known_line_users を参照
-      - key: LINE_BOOT_GREETING_USER_IDS
+      - key: KEEPALIVE_URL
         sync: false
-      - key: LINE_BOOT_GREETING_PUSH_STORE_LIMIT
+      - key: DISCORD_BOOT_GREETING_PUSH_STORE_LIMIT
         sync: false
-      - key: LINE_BOOT_GREETING_SKIP_STORED_IDS
+      - key: DISCORD_BOOT_GREETING_SKIP_STORED_IDS
         sync: false

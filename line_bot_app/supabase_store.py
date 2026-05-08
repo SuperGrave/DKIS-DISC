@@ -1,4 +1,4 @@
-"""Supabase: user_settings（全ユーザー共通）、memory_files（LINE user_id 別）、known_line_users（中期記憶・Push オプトイン等）。"""
+"""Supabase: user_settings（全ユーザー共通）、memory_files（Discord user_id 別）、known_line_users（中期記憶・起動通知オプトイン等）。"""
 
 from __future__ import annotations
 
@@ -130,7 +130,7 @@ def remember_line_user_for_push(uid: str | None) -> None:
 
 
 def _boot_push_store_limit() -> int:
-    raw = (os.environ.get("LINE_BOOT_GREETING_PUSH_STORE_LIMIT") or "50").strip()
+    raw = (os.environ.get("DISCORD_BOOT_GREETING_PUSH_STORE_LIMIT") or "50").strip()
     try:
         n = int(raw)
     except ValueError:
@@ -205,7 +205,7 @@ def append_mid_term_note(uid: str | None, chunk: str) -> tuple[bool, str]:
     """既存に空白区切りで結合し、長さ MID_TERM_NOTE_MAX_CHARS を超えたら末尾優先で切り詰める。"""
     u = normalize_memory_user_id(uid)
     if u == "anonymous":
-        return False, "LINE userId が無いため中期記憶は使えません。"
+        return False, "Discord userId が無いため中期記憶は使えません。"
     piece = (chunk or "").strip()
     if not piece:
         return False, "content が空です。"
@@ -254,7 +254,7 @@ def append_mid_term_note(uid: str | None, chunk: str) -> tuple[bool, str]:
 def clear_mid_term_note(uid: str | None) -> tuple[bool, str]:
     u = normalize_memory_user_id(uid)
     if u == "anonymous":
-        return False, "LINE userId が無いため中期記憶は使えません。"
+        return False, "Discord userId が無いため中期記憶は使えません。"
     sb = _client()
     if sb is None:
         return False, "Supabase が未設定です。"
@@ -362,7 +362,7 @@ def set_notify_worker_restart(uid: str | None, enabled: bool) -> tuple[bool, str
     """known_line_users に upsert し、notify_on_restart を設定する。"""
     u = normalize_memory_user_id(uid)
     if u == "anonymous":
-        return False, "LINE userId が無いため設定できません。"
+        return False, "Discord userId が無いため設定できません。"
     sb = _client()
     if sb is None:
         return False, "Supabase が未設定です（SUPABASE_URL / SUPABASE_KEY）。"
