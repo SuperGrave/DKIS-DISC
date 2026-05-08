@@ -1,0 +1,257 @@
+================================================================================
+  DKIS-LINE（dkis-ll）プロジェクト総合レポート
+================================================================================
+  作成趣旨: 実装状況・機能・構成・運用（Render / Supabase / LINE）の一本化資料
+  想定読者: 開発者・運用者・将来の自分
+  パッケージ版数（pyproject.toml）: 0.12.1
+  注意: README.md の一部記述は本レポート作成時点より古い場合がある。Webhook の
+        メッセージ送信は 0.12.1 で「reply 一括」（後述）に変更済み。
+
+--------------------------------------------------------------------------------
+1. プロジェクト概要
+--------------------------------------------------------------------------------
+
+  名称（PyPI/パッケージ名）: dkis-ll
+  役割: LINE 上で動作する DKIS 互換の軽量 AI ボット（東北きりたんキャラ）。
+
+  技術スタック（要点）:
+  - Python 3.12（.python-version 固定）
+  - 依存管理: uv（pyproject.toml / uv.lock）
+  - Web: Flask（エントリ main:app）
+  - 本番プロセス: gunicorn（workers 1 / threads 2 を render.yaml で想定）
+  - AI: OpenAI Chat Completions API（モデル ID は dist/settings.json で規定）
+  - LINE: line-bot-sdk v3（Webhook / Messaging API）
+  - 永続化（任意）: Supabase（PostgreSQL 相当のテーブル API）
+
+  明示的に「含まない」もの:
+  - Web フロント、SSE、音声、メディア再生、ローカルファイル直接操作 GUI
+
+--------------------------------------------------------------------------------
+2. 実装状況サマリ
+--------------------------------------------------------------------------------
+
+  [完了・本番想定で利用可能な領域]
+  - LINE Webhook 受信 → 署名検証 → OpenAI 応答 → LINE へ返信
+  - DKIS 形式のブロックパース（[CMD] / [ARGS] / [ARGS-2] / [TEXT] / [NOTE]）
+  - ツール連鎖（[ARGS-2].retry 最大 10 回、settings.json の control.max_retries）
+  - 検索・ニュース・天気・Web ページ抽出・会話 SPEAK
+  - Supabase 連携: 記憶ファイル（memory_files）、全員共通設定（user_settings）、
+    LINE ユーザメタ（known_line_users）
+  - ユーザー別「中期記憶」（mid_term_note）をシステムプロンプト末尾へ毎ターン注入
+  - ワーカー起動時の任意 Push（boot_greeting）と、オプトインユーザ向けの
+    次回応答用履歴差し込み（pending_worker_boot_history・SPEAK 形式ブロック）
+  - 応答形式異常時の専用ユーザー向けメッセージ（パース失敗時）
+  - ツール通知行（tool_notice_display / show_ri_text レガシー）
+
+  [任意・未設定時は縮退動作]
+  - Supabase 未設定: LIST/READ/WRITE 等はエラー文言のみ、設定 GET/SET も同様
+  - Google CSE 未設定: SEARCH は案内のみ
+  - 中期記憶・known_line_users は LINE userId 必須（anonymous では不可）
+
+  [運用上の外部制約]
+  - LINE Messaging API の無料枠・月間上限により 429（Too Many Requests）が発生しうる
+  - 0.12.1 以降、通常の Webhook 応答は「1 回の reply_message に最大 5 通まで」
+    同梱し、会話の追加分岐での push_message 連打を避ける設計（後述）
+
+--------------------------------------------------------------------------------
+3. 機能一覧（エンドユーザー／モデルから見た能力）
+--------------------------------------------------------------------------------
+
+  3.1 会話・出力形式
+  - モデルは system（ベース＋任意で中期記憶ブロック）＋履歴＋当ユーザ入力を受け取り、
+    決められたブロック形式で出力する。
+  - パースに成功するには [CMD] または [COMMAND] 行が必要（空コマンドは不可）。
+  - パース失敗時: 定型のユーザー向け文＋履歴には正規 SPEAK ブロックを残す。
+
+  3.2 コマンド（[CMD]）一覧
+
+  [会話・Web・検索系]（line_bot_app/commands.py）
+  - SPEAK        … 通常発話（[TEXT] を返答に使う）
+  - SEARCH       … Google カスタム検索（GOOGLE_API_KEY, GOOGLE_CX）
+  - NEWS         … Google News RSS（キー不要）
+  - WEATHER      … Open-Meteo（地名必須。現在地相当語はサーバ側で拒否）
+  - READ-PAGE    … trafilatura による本文抽出
+
+  [記憶・設定系]（line_bot_app/commands_memory.py）
+  - LIST-FILES   … memory_files の一覧（JSON）
+  - READ-TEXT    … 1 ファイル読込（要約 or 生は user_settings text.use_raw_result）
+  - WRITE-TEXT   … 新規・上書き
+  - APPEND-TEXT  … 末尾追記
+  - DELETE-TEXT  … 1 ファイル削除
+  - GET-SETTING  … 全キーをまとめて取得（ARGS の key は無視）
+  - SET-SETTING  … key/value で保存（notify_worker_restart はユーザー別）
+  - MID-MEMORY-APPEND … 中期記憶へ追記（最大 200 字・超過は末尾優先で切詰め）
+  - MID-MEMORY-CLEAR  … 中期記憶を空に
+
+  （過去にあった SAVE-LOG は削除済み）
+
+  3.3 モデル・ツール通知
+  - current_model: user_settings に保存。許可リストは settings.json の
+    ai_models.allowed_chat_models
+  - tool_notice_display: full | abbrev | minimal | hidden（リトライ行・末尾 [N1] の出し分け）
+
+  3.4 起動時挨拶（boot_greeting）
+  - dist/settings.json の notifications.restart_push_enabled が true のとき、
+    環境変数 LINE_BOOT_GREETING_USER_IDS と Supabase 上のオプトインユーザへ Push。
+  - notify_worker_restart=true のユーザーに対して Push した文を、次回の応答生成時に
+    assistant 履歴として 1 回だけ差し込む（本文は SPEAK 形式ブロックで DB に保持）。
+
+--------------------------------------------------------------------------------
+4. ファイル・ディレクトリ構成（主要のみ）
+--------------------------------------------------------------------------------
+
+  リポジトリルート
+  - main.py              … Flask アプリ生成（create_app）、ローカル時は app.run
+  - pyproject.toml       … 依存・パッケージ名・版
+  - uv.lock              … ロックファイル
+  - render.yaml          … Render Blueprint（build / start / env キー名）
+  - .env.example         … 環境変数テンプレート
+  - dev_console.py       … LINE なしで AIResponder.reply を試す開発用（本番では削除想定）
+  - README.md            … 利用手引（一部古い記述の可能性）
+
+  dist/
+  - settings.json        … モデル名・リトライ・履歴長・入力形式・起動 Push フラグ等
+  - system_prompt_main.txt … メインシステムプロンプト（キャラ・入出力形式・コマンド説明）
+  - supabase_schema.sql  … Supabase で実行する DDL / ALTER 一式（運用で SQL Editor 実行）
+
+  line_bot_app/
+  - app.py               … Flask、Webhook、LINE 返信（reply 一括送信）
+  - engine.py            … LineBrain：履歴、OpenAI 呼出、コマンド実行、リトライループ
+  - ai.py                … LineBrain の別名 AIResponder
+  - config.py            … AppConfig と load_config（環境変数必須チェック）
+  - settings_loader.py   … settings.json と system_prompt ファイルの読込
+  - parsing.py           … モデル出力パース、履歴用 SPEAK ブロック整形
+  - input_build.py       … UI / RI / LP / NT 形式の入力組み立て
+  - line_messages.py     … LINE 文字数上限・最大 5 バブルへの分割
+  - commands.py          … SEARCH 等の関数コマンド＋ CommandServices / ExportHooks
+  - commands_memory.py   … Supabase 記憶・設定・中期記憶コマンド
+  - supabase_store.py    … Supabase クライアント＋CRUD・中期記憶・boot 用列
+  - boot_greeting.py     … 起動時 Push 文生成・送信・履歴用ブロック保存
+  - tool_notice.py       … リトライ / 末尾の [Rn] [N1] 整形
+  - user_messages.py     … 障害時・パース失敗時のユーザー向け定型文
+  - google_cse.py / news_rss.py / weather_openmeteo.py / scrape_page.py … 各ツール実装
+
+  docs/
+  - IMPLEMENTATION_REPORT_SUPABASE_MEMORY.md … 記憶周りの詳細（Markdown）
+
+--------------------------------------------------------------------------------
+5. 利用形態（いつ・何を動かすか）
+--------------------------------------------------------------------------------
+
+  5.1 本番（Render 等）
+  - gunicorn で main:app をバインド（PORT はプラットフォーム付与）
+  - 環境変数に LINE と OPENAI、必要なら SUPABASE / GOOGLE を設定
+  - LINE Developers の Webhook URL を https://<ホスト>/webhook に設定
+
+  5.2 ローカル開発（Flask 単体）
+  - uv sync 後、uv run python main.py（PORT 既定 5000）
+  - ngrok 等で HTTPS トンネルを張り LINE Webhook に繋ぐ必要あり（LINE は HTTPS 必須）
+
+  5.3 開発コンソール（LINE なし）
+  - uv run python dev_console.py
+  - OPENAI_API_KEY のみ必須。user_id は console-dev 固定など。
+
+--------------------------------------------------------------------------------
+6. Render.com 連携
+--------------------------------------------------------------------------------
+
+  - Blueprint: ルートの render.yaml を検出してサービス作成
+  - buildCommand: uv sync
+  - startCommand: uv run gunicorn --workers 1 --threads 2 --bind 0.0.0.0:${PORT:-5000} main:app
+  - sync: false の環境変数はダッシュボードで手入力（Git に秘密を書かない）
+    例: LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, OPENAI_API_KEY,
+        SUPABASE_URL, SUPABASE_KEY, LINE_BOOT_GREETING_* など
+  - ヘルスチェック: GET / → JSON（ok, service, settings, credentials_ready）
+  - 無料プラン: スリープによりアイドル後の初回応答が遅れることがある
+  - マルチワーカー: リポジトリ方針は workers 1。複数プロセスにするとインメモリの
+    履歴がプロセス間で共有されない（設計上、履歴はプロセス内保持）。
+
+--------------------------------------------------------------------------------
+7. Supabase 連携
+--------------------------------------------------------------------------------
+
+  7.1 前提
+  - 環境変数 SUPABASE_URL, SUPABASE_KEY（サーバからの書込には service_role 推奨）
+  - dist/supabase_schema.sql を SQL Editor で実行し、テーブル・列を揃える
+
+  7.2 テーブル役割
+  - memory_files
+      (line_user_id, filename) PK。コンテンツ・説明・更新日時・文字数。
+      LINE アカウント単位の「名前付きメモファイル」。
+  - user_settings
+      setting_key PK。ボット全体共通のキー値（current_model, tool_notice_display 等）。
+  - known_line_users
+      line_user_id PK。last_seen_at, notify_on_restart（起動 Push オプトイン）、
+      pending_worker_boot_history（次回 1 回だけ assistant に差し込む SPEAK ブロック）、
+      mid_term_note（中期記憶・最大 200 字相当をアプリ側で制御）
+
+  7.3 運用メモ
+  - Webhook で userId を観測したとき remember_line_user_for_push で行を維持更新
+  - 列追加のみの場合は ALTER を追記運用（スキーマファイルと実 DB を一致させること）
+
+--------------------------------------------------------------------------------
+8. LINE 連携
+--------------------------------------------------------------------------------
+
+  8.1 Webhook
+  - POST /webhook、X-Line-Signature 検証（InvalidSignatureError 時は 400）
+  - テキストメッセージ: brain.reply → flatten_reply_parts で最大 5 チャンク
+  - 0.12.1: それらを 1 回の ReplyMessageRequest にまとめて返信（push_message に依存しない）
+  - 例外時: 可能なら同じ reply_token でエラー定型文を返す試行
+
+  8.2 Push API（残る用途）
+  - boot_greeting.maybe_send_worker_boot_greetings が起動時に Push を使用
+  - Messaging API の Push / Reply の別カウント・月間上限に注意（429）
+
+  8.3 制限・挙動
+  - 1 回の Reply で送れるメッセージ数は最大 5（実装で分割上限と一致）
+  - 長文は複数バブルに分かれるが、通常応答ではすべて reply に同梱
+
+--------------------------------------------------------------------------------
+9. 環境変数（再掲・補足）
+--------------------------------------------------------------------------------
+
+  必須（本番・Webhook）:
+  - LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, OPENAI_API_KEY
+
+  任意:
+  - DKIS_SETTINGS_PATH     … settings.json の代替パス
+  - GOOGLE_API_KEY, GOOGLE_CX … SEARCH
+  - SUPABASE_URL, SUPABASE_KEY … 記憶・設定・known_line_users
+  - LINE_BOOT_GREETING_USER_IDS … 起動 Push 宛（カンマ区切り userId）
+  - LINE_BOOT_GREETING_PUSH_STORE_LIMIT / LINE_BOOT_GREETING_SKIP_STORED_IDS
+  - PORT … ローカル既定 5000
+
+--------------------------------------------------------------------------------
+10. 設定ファイル dist/settings.json の主なキー
+--------------------------------------------------------------------------------
+
+  - ai_models.main / allowed_chat_models … 既定モデルと SET-SETTING 許可リスト
+  - system_prompts.main_file … プロンプトファイル名（dist 相対）
+  - control.max_retries … ツール連鎖上限（最大 10 など）
+  - control.max_history … 会話履歴ターン上限（リトライは user/assistant を増やす）
+  - control.max_retry_payload_chars … RI 再投入時の切詰め
+  - notifications.restart_push_enabled … 起動 Push 総スイッチ
+  - input_format.main … UI/RI/LP/NT ラベルと包含フラグ
+
+--------------------------------------------------------------------------------
+11. メンテナンス時のチェックリスト（短時間）
+--------------------------------------------------------------------------------
+
+  [ ] dist/supabase_schema.sql と本番 DB の列定義が一致しているか
+  [ ] Render の環境変数が欠けていないか（特に LINE / OpenAI / Supabase）
+  [ ] LINE Developers の Webhook URL と Bot 起動 URL が一致しているか
+  [ ] 429 が出た場合: LINE 側のプラン・月間送信上限を確認
+  [ ] システムプロンプト変更後、モデルがブロック形式を守れているか（パース失敗率）
+
+--------------------------------------------------------------------------------
+12. 参考・更新時の注意
+--------------------------------------------------------------------------------
+
+  - バージョンは pyproject.toml の version と Git ブランチ運用（例: dkis-line/0.x.x）で併用
+  - 本レポートは単一の .txt で完結させている。詳細な経緯は Git 履歴と
+    docs/IMPLEMENTATION_REPORT_SUPABASE_MEMORY.md を参照
+
+================================================================================
+  以上
+================================================================================
