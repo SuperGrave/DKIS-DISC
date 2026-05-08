@@ -13,7 +13,7 @@ from .config import AppConfig
 from .input_build import build_input_segments
 from .line_messages import split_line_text
 from .parsing import format_model_response_block, parse_ai_response
-from .supabase_store import get_db_setting
+from .supabase_store import get_db_setting, get_mid_term_note
 from .tool_notice import (
     ToolNoticeMode,
     format_normal_footer_line,
@@ -59,7 +59,7 @@ def _rt_arg_summary(command: str, args: object) -> str:
         return (u[:120] + "…") if len(u) > 120 else (u or "(urlなし)")
     if command == "LIST-FILES":
         return "(一覧)"
-    if command in ("READ-TEXT", "WRITE-TEXT", "APPEND-TEXT"):
+    if command in ("READ-TEXT", "WRITE-TEXT", "APPEND-TEXT", "DELETE-TEXT"):
         fn = str(args.get("filename") or "").strip()
         return (fn[:120] + "…") if len(fn) > 120 else (fn or "(filenameなし)")
     if command == "GET-SETTING":
@@ -67,6 +67,11 @@ def _rt_arg_summary(command: str, args: object) -> str:
     if command == "SET-SETTING":
         k = str(args.get("key") or "")
         return (k[:60] + "…") if len(k) > 60 else k or "(key)"
+    if command == "MID-MEMORY-APPEND":
+        frag = str(args.get("content") or "").strip()
+        return (frag[:30] + "…") if len(frag) > 30 else (frag or "(contentなし)")
+    if command == "MID-MEMORY-CLEAR":
+        return "(中期記憶リセット)"
     return "-"
 
 
@@ -139,11 +144,33 @@ class LineBrain:
             legacy_show_ri_text=get_db_setting("show_ri_text", "true"),
         )
 
+    def _build_system_prompt_for_user(self, user_id: str) -> str:
+        base = self._config.system_prompt
+        note = get_mid_term_note(user_id or "")
+        if not note.strip():
+            return base
+        suffix = (
+            "\n\n▼中期記憶（このマスター専用・1本・最大200字。サーバーが毎ターンここへ最新文を差し込みます）\n"
+            f"{note.strip()}"
+        )
+        return base + suffix
+
+    def _maybe_refresh_system_for_mid_memory(self, messages: list[dict], uid: str, parsed: dict) -> None:
+        cmd = (parsed.get("CMD") or "").strip().upper()
+        if cmd not in ("MID-MEMORY-APPEND", "MID-MEMORY-CLEAR"):
+            return
+        if not messages or messages[0].get("role") != "system":
+            return
+        messages[0] = {"role": "system", "content": self._build_system_prompt_for_user(uid)}
+
     def _ensure_session(self, user_id: str) -> list[dict]:
         key = user_id or "anonymous"
         hist = self._histories[key]
+        content = self._build_system_prompt_for_user(user_id or "anonymous")
         if not hist:
-            hist.append({"role": "system", "content": self._config.system_prompt})
+            hist.append({"role": "system", "content": content})
+        else:
+            hist[0] = {"role": "system", "content": content}
         return hist
 
     def _trim(self, messages: list[dict]) -> None:
@@ -254,6 +281,7 @@ class LineBrain:
             }
         else:
             TEXT, should_retry, dmis_log, summary, raw_result, _tu = self._execute(parsed, uid)
+        self._maybe_refresh_system_for_mid_memory(messages, uid, parsed)
         self._last_proc_by_user[uid] = dmis_log or "通常会話応答"
 
         if isinstance(raw_result, dict) and raw_result.get("__suppress_followup_retry__"):
@@ -321,6 +349,7 @@ class LineBrain:
             else:
                 TEXT, should_retry, dmis_log, summary, raw_result, _tu = self._execute(parsed_retry, uid)
                 parsed = parsed_retry
+            self._maybe_refresh_system_for_mid_memory(messages, uid, parsed)
             self._last_proc_by_user[uid] = dmis_log or "通常会話応答"
 
             if isinstance(raw_result, dict) and raw_result.get("__suppress_followup_retry__"):

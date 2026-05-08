@@ -1,4 +1,4 @@
-"""Supabase: user_settings（全ユーザー共通）、memory_files（LINE user_id 別）、known_line_users（Push 用オプトイン含む）。"""
+"""Supabase: user_settings（全ユーザー共通）、memory_files（LINE user_id 別）、known_line_users（中期記憶・Push オプトイン等）。"""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ def normalize_memory_user_id(uid: str | None) -> str:
 _filename_safe_re = re.compile(r"^[\w\-\.\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]+$")
 MAX_FILENAME_LEN = 200
 MAX_MEMORY_CONTENT_CHARS = 500_000
+MID_TERM_NOTE_MAX_CHARS = 200
 
 _client_cache: Any = None
 
@@ -179,6 +180,106 @@ def get_notify_worker_restart(uid: str | None) -> bool:
         return bool(v) if v is not None else False
     except Exception:
         return False
+
+
+def get_mid_term_note(uid: str | None) -> str:
+    """known_line_users.mid_term_note。1 本・短文のユーザー別中期記憶。"""
+    u = normalize_memory_user_id(uid)
+    if u == "anonymous":
+        return ""
+    sb = _client()
+    if sb is None:
+        return ""
+    try:
+        r = sb.table("known_line_users").select("mid_term_note").eq("line_user_id", u).limit(1).execute()
+        rows = r.data or []
+        if not rows:
+            return ""
+        v = rows[0].get("mid_term_note")
+        return str(v).strip() if v is not None else ""
+    except Exception:
+        return ""
+
+
+def append_mid_term_note(uid: str | None, chunk: str) -> tuple[bool, str]:
+    """既存に空白区切りで結合し、長さ MID_TERM_NOTE_MAX_CHARS を超えたら末尾優先で切り詰める。"""
+    u = normalize_memory_user_id(uid)
+    if u == "anonymous":
+        return False, "LINE userId が無いため中期記憶は使えません。"
+    piece = (chunk or "").strip()
+    if not piece:
+        return False, "content が空です。"
+    sb = _client()
+    if sb is None:
+        return False, "Supabase が未設定です。"
+    notify = False
+    cur = ""
+    try:
+        r = (
+            sb.table("known_line_users")
+            .select("notify_on_restart,mid_term_note")
+            .eq("line_user_id", u)
+            .limit(1)
+            .execute()
+        )
+        rows = r.data or []
+        if rows:
+            v = rows[0].get("notify_on_restart")
+            notify = bool(v) if v is not None else False
+            m = rows[0].get("mid_term_note")
+            cur = str(m).strip() if m is not None else ""
+    except Exception:
+        pass
+    merged = f"{cur} {piece}" if cur else piece
+    merged = merged.strip()
+    if len(merged) > MID_TERM_NOTE_MAX_CHARS:
+        merged = merged[-MID_TERM_NOTE_MAX_CHARS:]
+    try:
+        sb.table("known_line_users").upsert(
+            {
+                "line_user_id": u,
+                "last_seen_at": _now_iso(),
+                "notify_on_restart": notify,
+                "mid_term_note": merged,
+            },
+            on_conflict="line_user_id",
+        ).execute()
+        return True, (
+            f"MID-MEMORY-APPEND 完了（現在 {len(merged)} 字・上限 {MID_TERM_NOTE_MAX_CHARS}）。\n{merged}"
+        )
+    except Exception as exc:
+        return False, str(exc)
+
+
+def clear_mid_term_note(uid: str | None) -> tuple[bool, str]:
+    u = normalize_memory_user_id(uid)
+    if u == "anonymous":
+        return False, "LINE userId が無いため中期記憶は使えません。"
+    sb = _client()
+    if sb is None:
+        return False, "Supabase が未設定です。"
+    notify = False
+    try:
+        r = sb.table("known_line_users").select("notify_on_restart").eq("line_user_id", u).limit(1).execute()
+        rows = r.data or []
+        if rows:
+            v = rows[0].get("notify_on_restart")
+            notify = bool(v) if v is not None else False
+    except Exception:
+        pass
+    try:
+        sb.table("known_line_users").upsert(
+            {
+                "line_user_id": u,
+                "last_seen_at": _now_iso(),
+                "notify_on_restart": notify,
+                "mid_term_note": "",
+            },
+            on_conflict="line_user_id",
+        ).execute()
+        return True, "MID-MEMORY-CLEAR 完了（中期記憶を空にしました）。"
+    except Exception as exc:
+        return False, str(exc)
 
 
 _MAX_PENDING_BOOT_HISTORY_CHARS = 12_000
@@ -430,6 +531,26 @@ def memory_append(filename: str, append_content: str, line_user_id: str) -> str:
             ).execute()
         except Exception:
             sb.table("memory_files").upsert(base_row, on_conflict="line_user_id,filename").execute()
+        return ""
+    except Exception as exc:
+        return str(exc)
+
+
+def memory_delete(filename: str, line_user_id: str) -> str:
+    fn = validate_memory_filename(filename)
+    if fn is None:
+        return "不正なファイル名です。"
+    uid = normalize_memory_user_id(line_user_id)
+    sb = _client()
+    if sb is None:
+        return "Supabase が未設定です。"
+    row, err = memory_read_row(fn, uid)
+    if err:
+        return err
+    if row is None:
+        return "DELETE-TEXT: ファイルが見つかりません。"
+    try:
+        sb.table("memory_files").delete().eq("filename", fn).eq("line_user_id", uid).execute()
         return ""
     except Exception as exc:
         return str(exc)

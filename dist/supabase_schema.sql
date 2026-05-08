@@ -43,3 +43,4 @@ ALTER TABLE memory_files ADD COLUMN IF NOT EXISTS content_chars INTEGER NOT NULL
 UPDATE memory_files SET content_chars = length(coalesce(content, ''));
 
 ALTER TABLE known_line_users ADD COLUMN IF NOT EXISTS pending_worker_boot_history TEXT;
+ALTER TABLE known_line_users ADD COLUMN IF NOT EXISTS mid_term_note TEXT NOT NULL DEFAULT '';

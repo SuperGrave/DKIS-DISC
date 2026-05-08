@@ -1,4 +1,4 @@
-"""Supabase 記憶コマンド（LIST-FILES / READ-TEXT / WRITE-TEXT / APPEND-TEXT / GET-SETTING / SET-SETTING）。"""
+"""Supabase 記憶コマンド（LIST-FILES / READ-TEXT / WRITE-TEXT / APPEND-TEXT / DELETE-TEXT / GET-SETTING / SET-SETTING / 中期記憶）。"""
 
 from __future__ import annotations
 
@@ -14,10 +14,13 @@ from .tool_notice import (
 )
 from .commands import CommandServices
 from .supabase_store import (
+    append_mid_term_note,
+    clear_mid_term_note,
     dumps_memory_index,
     get_db_setting,
     get_notify_worker_restart,
     memory_append,
+    memory_delete,
     memory_list_files,
     memory_read_row,
     memory_write,
@@ -167,6 +170,38 @@ def cmd_append_text(svc: CommandServices, args: dict, TEXT: str, NOTE: str | Non
     return TEXT or "", ok, ok, ok, None
 
 
+def cmd_delete_text(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None, *, user_id=None):
+    if not isinstance(args, dict):
+        args = {}
+    fn = str(args.get("filename") or "").strip()
+    if validate_memory_filename(fn) is None:
+        msg = "filename が不正か空です。"
+        return (TEXT or "").strip(), "DELETE-TEXT 検証エラー", msg, None, None
+
+    err = memory_delete(fn, user_id or "")
+    if err:
+        return (TEXT or "").strip(), "DELETE-TEXT 失敗", err, None, None
+    ok = f"DELETE-TEXT 完了: {fn}"
+    return TEXT or "", ok, ok, ok, None
+
+
+def cmd_mid_memory_append(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None, *, user_id=None):
+    if not isinstance(args, dict):
+        args = {}
+    chunk = str(args.get("content") if args.get("content") is not None else "")
+    ok, line = append_mid_term_note(user_id or "", chunk)
+    if not ok:
+        return (TEXT or "").strip(), "MID-MEMORY-APPEND 失敗", line, None, None
+    return TEXT or "", "MID-MEMORY-APPEND", line, line, None
+
+
+def cmd_mid_memory_clear(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None, *, user_id=None):
+    ok, line = clear_mid_term_note(user_id or "")
+    if not ok:
+        return (TEXT or "").strip(), "MID-MEMORY-CLEAR 失敗", line, None, None
+    return TEXT or "", "MID-MEMORY-CLEAR", line, line, None
+
+
 def _format_setting_block(svc: CommandServices, key: str, user_id: str | None) -> str:
     """単一キーの説明テキスト（GET-SETTING の本文）。"""
     defaults = {
@@ -300,6 +335,9 @@ MEMORY_COMMAND_HANDLERS: dict[str, Any] = {
     "READ-TEXT": cmd_read_text,
     "WRITE-TEXT": cmd_write_text,
     "APPEND-TEXT": cmd_append_text,
+    "DELETE-TEXT": cmd_delete_text,
     "GET-SETTING": cmd_get_setting,
     "SET-SETTING": cmd_set_setting,
+    "MID-MEMORY-APPEND": cmd_mid_memory_append,
+    "MID-MEMORY-CLEAR": cmd_mid_memory_clear,
 }
