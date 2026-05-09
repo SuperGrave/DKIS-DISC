@@ -17,7 +17,7 @@ from line_bot_app.ai import AIResponder
 from line_bot_app.boot_greeting import maybe_build_worker_boot_greeting
 from line_bot_app.config import load_config
 from line_bot_app.line_messages import split_line_text
-from line_bot_app.supabase_store import remember_line_user_for_push
+from line_bot_app.supabase_store import remember_discord_user_for_push
 from line_bot_app.user_messages import MSG_SYSTEM_FAILURE
 
 logger = logging.getLogger("dkis_disc")
@@ -58,6 +58,28 @@ def restart_process() -> None:
 async def _send_discord_chunks(channel: discord.abc.Messageable, text: str) -> None:
     for chunk in split_line_text(text):
         await channel.send(chunk)
+
+
+async def _reply_with_streaming(
+    brain: AIResponder,
+    *,
+    uid: str,
+    user_text: str,
+    channel: discord.abc.Messageable,
+) -> None:
+    """AIが確定した応答パートをDiscordへ逐次送信する。"""
+    loop = asyncio.get_running_loop()
+
+    def on_line_message(chunk: str) -> None:
+        future = asyncio.run_coroutine_threadsafe(channel.send(chunk), loop)
+        future.result(timeout=60)
+
+    await asyncio.to_thread(
+        brain.reply,
+        uid,
+        user_text,
+        on_line_message=on_line_message,
+    )
 
 
 def _start_health_server() -> None:
@@ -168,12 +190,15 @@ def create_bot() -> discord.Client:
             return
 
         uid = _discord_user_key(message.author.id)
-        remember_line_user_for_push(uid)
+        remember_discord_user_for_push(uid)
         try:
             async with message.channel.typing():
-                reply_parts = await asyncio.to_thread(brain.reply, uid, user_text)
-            for part in reply_parts:
-                await _send_discord_chunks(message.channel, part)
+                await _reply_with_streaming(
+                    brain,
+                    uid=uid,
+                    user_text=user_text,
+                    channel=message.channel,
+                )
         except Exception:
             logger.exception("AI reply generation or Discord send failed")
             await message.channel.send(MSG_SYSTEM_FAILURE)

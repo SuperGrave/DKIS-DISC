@@ -1,4 +1,7 @@
-"""Supabase: user_settings（全ユーザー共通）、memory_files（Discord user_id 別）、known_line_users（中期記憶・起動通知オプトイン等）。"""
+"""Supabase: user_settings（全ユーザー共通）、memory_files（Discord user_id 別）、known_line_users（中期記憶・起動通知オプトイン等）。
+
+DB の既存テーブル名・列名は LINE 版からの互換名を維持する。
+"""
 
 from __future__ import annotations
 
@@ -104,7 +107,12 @@ def _now_iso() -> str:
 
 
 def remember_line_user_for_push(uid: str | None) -> None:
-    """Webhook で観測した userId を保存。notify_on_restart は既存行があれば維持する。"""
+    """互換名。Discord 入口では remember_discord_user_for_push を使う。"""
+    remember_discord_user_for_push(uid)
+
+
+def remember_discord_user_for_push(uid: str | None) -> None:
+    """Discord で観測した userId を保存。notify_on_restart は既存行があれば維持する。"""
     u = normalize_memory_user_id(uid)
     if u == "anonymous":
         return
