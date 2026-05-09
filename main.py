@@ -26,6 +26,7 @@ from line_bot_app.supabase_store import remember_discord_user_for_push
 from line_bot_app.user_messages import MSG_SYSTEM_FAILURE
 
 logger = logging.getLogger("dkis_disc")
+DISCORD_HTTP_USER_AGENT = "DKIS-DISC (https://github.com/SuperGrave/DKIS-DISC, 1.0.0)"
 
 
 @dataclass(frozen=True)
@@ -157,6 +158,17 @@ def _discord_followup_url(application_id: str, interaction_token: str) -> str:
     return f"https://discord.com/api/v10/webhooks/{application_id}/{interaction_token}"
 
 
+def _discord_json_headers(*, token: str | None = None) -> dict[str, str]:
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "Accept": "application/json",
+        "User-Agent": DISCORD_HTTP_USER_AGENT,
+    }
+    if token:
+        headers["Authorization"] = f"Bot {token}"
+    return headers
+
+
 def _post_discord_webhook(url: str, content: str) -> None:
     data = json.dumps(
         {
@@ -168,7 +180,7 @@ def _post_discord_webhook(url: str, content: str) -> None:
     request = urllib.request.Request(
         url,
         data=data,
-        headers={"Content-Type": "application/json; charset=utf-8"},
+        headers=_discord_json_headers(),
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=30) as response:
@@ -316,10 +328,7 @@ def _register_kiritan_command() -> None:
     request = urllib.request.Request(
         url,
         data=data,
-        headers={
-            "Authorization": f"Bot {token}",
-            "Content-Type": "application/json; charset=utf-8",
-        },
+        headers=_discord_json_headers(token=token),
         method="POST",
     )
     try:
