@@ -7,20 +7,32 @@ import os
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
+from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import discord
 from dotenv import load_dotenv
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from line_bot_app.ai import AIResponder
 from line_bot_app.boot_greeting import maybe_build_worker_boot_greeting
 from line_bot_app.config import load_config
+from line_bot_app.config import AppConfig
 from line_bot_app.line_messages import split_line_text
 from line_bot_app.supabase_store import remember_discord_user_for_push
 from line_bot_app.user_messages import MSG_SYSTEM_FAILURE
 
 logger = logging.getLogger("dkis_disc")
+
+
+@dataclass(frozen=True)
+class BotRuntime:
+    config: AppConfig
+    brain: AIResponder
+    reply_lock: object = field(default_factory=threading.RLock)
 
 
 def _discord_user_key(user_id: int) -> str:
@@ -32,6 +44,14 @@ def _env_flag(name: str, default: bool = False) -> bool:
     if not raw:
         return default
     return raw in {"1", "true", "yes", "on"}
+
+
+def _message_mode() -> str:
+    raw = (os.environ.get("DISCORD_MESSAGE_MODE") or "slash_only").strip().lower()
+    if raw in {"all", "mention", "slash_only"}:
+        return raw
+    logger.warning("Unknown DISCORD_MESSAGE_MODE=%r; using slash_only", raw)
+    return "slash_only"
 
 
 def _is_restart_command(content: str) -> bool:
@@ -61,7 +81,7 @@ async def _send_discord_chunks(channel: discord.abc.Messageable, text: str) -> N
 
 
 async def _reply_with_streaming(
-    brain: AIResponder,
+    runtime: BotRuntime,
     *,
     uid: str,
     user_text: str,
@@ -74,25 +94,161 @@ async def _reply_with_streaming(
         future = asyncio.run_coroutine_threadsafe(channel.send(chunk), loop)
         future.result(timeout=60)
 
+    def reply() -> None:
+        with runtime.reply_lock:
+            runtime.brain.reply(
+                uid,
+                user_text,
+                on_line_message=on_line_message,
+            )
+
     await asyncio.to_thread(
-        brain.reply,
-        uid,
-        user_text,
-        on_line_message=on_line_message,
+        reply,
     )
 
 
-def _start_health_server() -> None:
+def _build_runtime() -> BotRuntime:
+    openai_ready = bool((os.environ.get("OPENAI_API_KEY") or "").strip())
+    config = load_config(require_line_credentials=False, require_openai=openai_ready)
+    return BotRuntime(config=config, brain=AIResponder(config))
+
+
+def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> None:
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    handler.send_response(status)
+    handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
+def _verify_discord_interaction(body: bytes, headers) -> bool:
+    public_key_hex = (os.environ.get("DISCORD_PUBLIC_KEY") or "").strip()
+    if not public_key_hex:
+        logger.warning("DISCORD_PUBLIC_KEY is not set; interaction endpoint is disabled")
+        return False
+    signature = (headers.get("X-Signature-Ed25519") or "").strip()
+    timestamp = (headers.get("X-Signature-Timestamp") or "").strip()
+    if not signature or not timestamp:
+        return False
+    try:
+        public_key = Ed25519PublicKey.from_public_bytes(bytes.fromhex(public_key_hex))
+        public_key.verify(bytes.fromhex(signature), timestamp.encode("utf-8") + body)
+        return True
+    except (ValueError, InvalidSignature):
+        return False
+
+
+def _interaction_option_value(data: dict, name: str) -> str:
+    for option in data.get("options") or []:
+        if option.get("name") == name:
+            return str(option.get("value") or "").strip()
+    return ""
+
+
+def _interaction_user_id(payload: dict) -> str:
+    member = payload.get("member") or {}
+    user = member.get("user") or payload.get("user") or {}
+    raw = str(user.get("id") or "").strip()
+    return _discord_user_key(int(raw)) if raw.isdigit() else "discord:interaction"
+
+
+def _discord_followup_url(application_id: str, interaction_token: str) -> str:
+    return f"https://discord.com/api/v10/webhooks/{application_id}/{interaction_token}"
+
+
+def _post_discord_webhook(url: str, content: str) -> None:
+    data = json.dumps(
+        {
+            "content": content,
+            "allowed_mentions": {"parse": []},
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/json; charset=utf-8"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        if response.status >= 300:
+            raise RuntimeError(f"Discord followup failed: HTTP {response.status}")
+
+
+def _run_interaction_reply(runtime: BotRuntime, payload: dict) -> None:
+    data = payload.get("data") or {}
+    text = _interaction_option_value(data, "message")
+    application_id = str(payload.get("application_id") or "").strip()
+    token = str(payload.get("token") or "").strip()
+    webhook_url = _discord_followup_url(application_id, token)
+
+    if not text:
+        _post_discord_webhook(webhook_url, "起きています。`/kiritan message:...` できりたんに話しかけられます。")
+        return
+
+    uid = _interaction_user_id(payload)
+    remember_discord_user_for_push(uid)
+
+    def on_line_message(chunk: str) -> None:
+        _post_discord_webhook(webhook_url, chunk)
+
+    try:
+        with runtime.reply_lock:
+            runtime.brain.reply(uid, text, on_line_message=on_line_message)
+    except Exception:
+        logger.exception("AI reply generation or Discord interaction followup failed")
+        try:
+            _post_discord_webhook(webhook_url, MSG_SYSTEM_FAILURE)
+        except Exception:
+            logger.exception("Discord interaction failure message send failed")
+
+
+def _handle_discord_interaction(runtime: BotRuntime, payload: dict) -> dict:
+    interaction_type = payload.get("type")
+    if interaction_type == 1:
+        return {"type": 1}
+
+    if interaction_type != 2:
+        return {"type": 4, "data": {"content": "未対応のInteractionです。", "flags": 64}}
+
+    data = payload.get("data") or {}
+    if str(data.get("name") or "").lower() != "kiritan":
+        return {"type": 4, "data": {"content": "未対応のコマンドです。", "flags": 64}}
+
+    threading.Thread(
+        target=_run_interaction_reply,
+        args=(runtime, payload),
+        name="discord-interaction-reply",
+        daemon=True,
+    ).start()
+    return {"type": 5}
+
+
+def _start_health_server(runtime: BotRuntime) -> None:
     port = int(os.environ.get("PORT", "5000"))
 
     class HealthHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
-            body = json.dumps({"ok": True, "service": "dkis-disc-bot"}).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            _json_response(self, 200, {"ok": True, "service": "dkis-disc-bot"})
+
+        def do_POST(self) -> None:  # noqa: N802
+            if self.path.rstrip("/") != "/interactions":
+                _json_response(self, 404, {"ok": False, "error": "not_found"})
+                return
+
+            length = int(self.headers.get("Content-Length") or "0")
+            body = self.rfile.read(length)
+            if not _verify_discord_interaction(body, self.headers):
+                _json_response(self, 401, {"ok": False, "error": "invalid_signature"})
+                return
+            try:
+                payload = json.loads(body.decode("utf-8"))
+            except json.JSONDecodeError:
+                _json_response(self, 400, {"ok": False, "error": "invalid_json"})
+                return
+
+            _json_response(self, 200, _handle_discord_interaction(runtime, payload))
 
         def log_message(self, format: str, *args: object) -> None:
             logger.debug("health server: " + format, *args)
@@ -128,17 +284,66 @@ def _start_self_ping() -> None:
     threading.Thread(target=ping_loop, name="keepalive-ping", daemon=True).start()
 
 
-def create_bot() -> discord.Client:
+def _register_kiritan_command() -> None:
+    if not _env_flag("DISCORD_AUTO_REGISTER_COMMANDS", True):
+        return
+    application_id = (os.environ.get("DISCORD_APPLICATION_ID") or "").strip()
+    token = (os.environ.get("DISCORD_BOT_TOKEN") or "").strip()
+    if not application_id or not token:
+        logger.info("Discord command registration skipped; DISCORD_APPLICATION_ID or token is not set")
+        return
+
+    guild_id = (os.environ.get("DISCORD_GUILD_ID") or "").strip()
+    if guild_id:
+        url = f"https://discord.com/api/v10/applications/{application_id}/guilds/{guild_id}/commands"
+    else:
+        url = f"https://discord.com/api/v10/applications/{application_id}/commands"
+
+    command = {
+        "name": "kiritan",
+        "description": "きりたんに向けて話します。messageを空にすると起こすだけです。",
+        "type": 1,
+        "options": [
+            {
+                "type": 3,
+                "name": "message",
+                "description": "きりたんに話しかける内容",
+                "required": False,
+            }
+        ],
+    }
+    data = json.dumps(command, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=data,
+        headers={
+            "Authorization": f"Bot {token}",
+            "Content-Type": "application/json; charset=utf-8",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            logger.info("Discord /kiritan command registration: HTTP %s", response.status)
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        logger.error("Discord command registration failed: HTTP %s %s", exc.code, body)
+    except Exception:
+        logger.exception("Discord command registration failed")
+
+
+def create_bot(runtime: BotRuntime | None = None) -> discord.Client:
     load_dotenv()
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper())
 
     token_ready = bool((os.environ.get("DISCORD_BOT_TOKEN") or "").strip())
-    openai_ready = bool((os.environ.get("OPENAI_API_KEY") or "").strip())
-    config = load_config(require_line_credentials=False, require_openai=openai_ready)
-    brain = AIResponder(config)
+    if runtime is None:
+        runtime = _build_runtime()
+    config = runtime.config
+    message_mode = _message_mode()
 
     intents = discord.Intents.default()
-    intents.message_content = True
+    intents.message_content = message_mode != "slash_only"
     client = discord.Client(intents=intents)
     boot_greeting_sent = False
 
@@ -176,9 +381,19 @@ def create_bot() -> discord.Client:
     async def on_message(message: discord.Message) -> None:
         if message.author.bot:
             return
+        if message_mode == "slash_only":
+            return
         user_text = (message.content or "").strip()
         if not user_text:
             return
+        if message_mode == "mention":
+            if client.user not in message.mentions:
+                return
+            if client.user is not None:
+                user_text = user_text.replace(client.user.mention, "").strip()
+            if not user_text:
+                await message.channel.send("呼びましたか、マスター。用件も一緒に送ってください。")
+                return
 
         if _is_restart_command(user_text):
             if not _can_restart(message):
@@ -194,7 +409,7 @@ def create_bot() -> discord.Client:
         try:
             async with message.channel.typing():
                 await _reply_with_streaming(
-                    brain,
+                    runtime,
                     uid=uid,
                     user_text=user_text,
                     channel=message.channel,
@@ -210,8 +425,11 @@ def create_bot() -> discord.Client:
 
 if __name__ == "__main__":
     load_dotenv()
-    _start_health_server()
+    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper())
+    runtime = _build_runtime()
+    _register_kiritan_command()
+    _start_health_server(runtime)
     _start_self_ping()
-    bot = create_bot()
+    bot = create_bot(runtime)
     TOKEN = (os.environ.get("DISCORD_BOT_TOKEN") or "").strip()
     bot.run(TOKEN)
