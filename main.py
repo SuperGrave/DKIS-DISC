@@ -196,7 +196,6 @@ def _run_interaction_reply(runtime: BotRuntime, payload: dict) -> None:
     webhook_url = _discord_followup_url(application_id, token)
 
     if not text:
-        _post_discord_webhook(webhook_url, "起きています。`/kiritan message:...` できりたんに話しかけられます。")
         return
 
     uid = _interaction_user_id(payload)
@@ -216,25 +215,35 @@ def _run_interaction_reply(runtime: BotRuntime, payload: dict) -> None:
             logger.exception("Discord interaction failure message send failed")
 
 
-def _handle_discord_interaction(runtime: BotRuntime, payload: dict) -> dict:
+def _handle_discord_interaction(payload: dict) -> tuple[dict, bool]:
     interaction_type = payload.get("type")
     if interaction_type == 1:
-        return {"type": 1}
+        return {"type": 1}, False
 
     if interaction_type != 2:
-        return {"type": 4, "data": {"content": "未対応のInteractionです。", "flags": 64}}
+        return {"type": 4, "data": {"content": "未対応のInteractionです。", "flags": 64}}, False
 
     data = payload.get("data") or {}
     if str(data.get("name") or "").lower() != "kiritan":
-        return {"type": 4, "data": {"content": "未対応のコマンドです。", "flags": 64}}
+        return {"type": 4, "data": {"content": "未対応のコマンドです。", "flags": 64}}, False
 
+    text = _interaction_option_value(data, "message")
+    if not text:
+        return {
+            "type": 4,
+            "data": {"content": "起きています。`/kiritan message:...` できりたんに話しかけられます。"},
+        }, False
+
+    return {"type": 5}, True
+
+
+def _start_interaction_reply_thread(runtime: BotRuntime, payload: dict) -> None:
     threading.Thread(
         target=_run_interaction_reply,
         args=(runtime, payload),
         name="discord-interaction-reply",
         daemon=True,
     ).start()
-    return {"type": 5}
 
 
 def _start_health_server(runtime: BotRuntime) -> None:
@@ -260,7 +269,10 @@ def _start_health_server(runtime: BotRuntime) -> None:
                 _json_response(self, 400, {"ok": False, "error": "invalid_json"})
                 return
 
-            _json_response(self, 200, _handle_discord_interaction(runtime, payload))
+            response, should_followup = _handle_discord_interaction(payload)
+            _json_response(self, 200, response)
+            if should_followup:
+                _start_interaction_reply_thread(runtime, payload)
 
         def log_message(self, format: str, *args: object) -> None:
             logger.debug("health server: " + format, *args)
