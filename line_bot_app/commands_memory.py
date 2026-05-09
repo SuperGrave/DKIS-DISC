@@ -8,6 +8,7 @@ from typing import Any
 from openai import OpenAI
 
 from .chat_models import format_allowed_models_hint, resolve_chat_model
+from .config import AppConfig
 from .tool_notice import (
     ALLOWED_TOOL_NOTICE_DISPLAY_HINT,
     parse_tool_notice_mode,
@@ -202,10 +203,10 @@ def cmd_mid_memory_clear(svc: CommandServices, args: dict, TEXT: str, NOTE: str 
     return TEXT or "", "MID-MEMORY-CLEAR", line, line, None
 
 
-def _format_setting_block(svc: CommandServices, key: str, user_id: str | None) -> str:
+def _format_setting_block(config: AppConfig, key: str, user_id: str | None) -> str:
     """単一キーの説明テキスト（GET-SETTING の本文）。"""
     defaults = {
-        "current_model": svc.config.openai_model,
+        "current_model": config.openai_model,
         "show_ri_text": "true",
         "tool_notice_display": "",
         "text.use_raw_result": "false",
@@ -218,7 +219,7 @@ def _format_setting_block(svc: CommandServices, key: str, user_id: str | None) -
                 "このキーは known_line_users（この Discord アカウント単位）に保存されます。"
             )
         on = get_notify_worker_restart(uid)
-        if svc.config.restart_push_enabled:
+        if config.restart_push_enabled:
             srv = "オン … settings.json の notifications.restart_push_enabled が true で、再起動時の定型 Push を送れます。"
         else:
             srv = (
@@ -235,8 +236,8 @@ def _format_setting_block(svc: CommandServices, key: str, user_id: str | None) -
 
     val = get_db_setting(key, defaults.get(key, ""))
     if key == "current_model":
-        eff = resolve_chat_model(val, svc.config.openai_model, svc.config.allowed_chat_models)
-        hint = format_allowed_models_hint(svc.config.allowed_chat_models)
+        eff = resolve_chat_model(val, config.openai_model, config.allowed_chat_models)
+        hint = format_allowed_models_hint(config.allowed_chat_models)
         line = (
             f"{key} DB値={val!r}\n"
             f"実効モデル={eff!r}\n"
@@ -261,65 +262,62 @@ def _format_setting_block(svc: CommandServices, key: str, user_id: str | None) -
 
 def cmd_get_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None, *, user_id=None):
     """常に全設定キーをまとめて返す（ARGS の key は無視）。"""
-    blocks = [_format_setting_block(svc, k, user_id) for k in _ALL_SETTING_KEYS_ORDER]
-    headings = [f"【{k}】" for k in _ALL_SETTING_KEYS_ORDER]
-    inner = "\n\n---\n\n".join(f"{h}\n{b}" for h, b in zip(headings, blocks, strict=True))
-    line = "（GET-SETTING 全項目）\n\n" + inner
+    line = build_settings_text(svc.config, user_id)
     return TEXT or "", "GET-SETTING (all)", line, None, None
 
 
-def cmd_set_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None, *, user_id=None):
-    if not isinstance(args, dict):
-        args = {}
-    key = str(args.get("key") or "").strip()
-    val = str(args.get("value") if args.get("value") is not None else "")
+def build_settings_text(config: AppConfig, user_id: str | None) -> str:
+    blocks = [_format_setting_block(config, k, user_id) for k in _ALL_SETTING_KEYS_ORDER]
+    headings = [f"【{k}】" for k in _ALL_SETTING_KEYS_ORDER]
+    inner = "\n\n---\n\n".join(f"{h}\n{b}" for h, b in zip(headings, blocks, strict=True))
+    return "（設定 全項目）\n\n" + inner
+
+
+def set_setting_value(config: AppConfig, key: str, val: str, user_id: str | None) -> tuple[bool, str]:
+    key = str(key or "").strip()
+    val = str(val if val is not None else "")
     if key not in _ALLOWED_SETTING_KEYS:
-        msg = f"key は {_ALLOWED_SETTING_KEYS} のいずれかです。"
-        return (TEXT or "").strip(), "SET-SETTING 検証", msg, None, None
+        return False, f"key は {sorted(_ALLOWED_SETTING_KEYS)} のいずれかです。"
     if key == "notify_worker_restart":
         uid = normalize_memory_user_id(user_id or "")
         if uid == "anonymous":
-            msg = "Discord userId が無いため notify_worker_restart は設定できません。"
-            return (TEXT or "").strip(), "SET-SETTING 拒否", msg, None, None
+            return False, "Discord userId が無いため notify_worker_restart は設定できません。"
         vm = val.strip().lower()
         if vm not in ("true", "false", "1", "0", "yes", "no", "on", "off"):
-            msg = "notify_worker_restart の value は true/false（または 1/0、yes/no、on/off）です。"
-            return (TEXT or "").strip(), "SET-SETTING 拒否", msg, None, None
+            return False, "notify_worker_restart の value は true/false（または 1/0、yes/no、on/off）です。"
         enabled = vm in ("true", "1", "yes", "on")
         ok, err = set_notify_worker_restart(uid, enabled)
         if not ok:
-            return (TEXT or "").strip(), "SET-SETTING 失敗", err or "不明なエラー", None, None
+            return False, err or "不明なエラー"
         line = (
             f"notify_worker_restart を {'オン' if enabled else 'オフ'} にしました。\n"
             "※この Discord アカウントだけに適用されます（known_line_users）。"
         )
-        if not svc.config.restart_push_enabled:
+        if not config.restart_push_enabled:
             line += (
                 "\n（注: notifications.restart_push_enabled=false のため、"
                 "再起動時の定型 Push はサーバーから送られません。）"
             )
-        return TEXT or "", f"SET-SETTING {key}", line, None, None
+        return True, line
 
     if key == "current_model":
         vm = val.strip()
-        if vm and vm not in svc.config.allowed_chat_models:
-            hint = format_allowed_models_hint(svc.config.allowed_chat_models)
-            msg = f"このモデルは許可リストにありません: {vm!r}。許可: {hint}"
-            return (TEXT or "").strip(), "SET-SETTING 拒否", msg, None, None
+        if vm and vm not in config.allowed_chat_models:
+            hint = format_allowed_models_hint(config.allowed_chat_models)
+            return False, f"このモデルは許可リストにありません: {vm!r}。許可: {hint}"
     if key == "tool_notice_display":
         vm = val.strip().lower()
         if vm and vm not in _TOOL_NOTICE_DB_VALUES:
-            msg = (
+            return False, (
                 f"tool_notice_display は {sorted(_TOOL_NOTICE_DB_VALUES)} のいずれか、"
                 f"または空（レガシーの show_ri_text に従う）です。"
             )
-            return (TEXT or "").strip(), "SET-SETTING 拒否", msg, None, None
     ok, err = set_db_setting(key, val)
     if not ok:
-        return (TEXT or "").strip(), "SET-SETTING 失敗", err or "不明なエラー", None, None
+        return False, err or "不明なエラー"
     line = f"{key} を保存しました。"
     if key == "current_model":
-        line += f" 実効モデルは {resolve_chat_model(val, svc.config.openai_model, svc.config.allowed_chat_models)!r} です。"
+        line += f" 実効モデルは {resolve_chat_model(val, config.openai_model, config.allowed_chat_models)!r} です。"
     elif key == "tool_notice_display":
         eff = parse_tool_notice_mode(val, legacy_show_ri_text=get_db_setting("show_ri_text", "true"))
         line += f" 実効モードは {eff.value} です。"
@@ -327,6 +325,17 @@ def cmd_set_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | Non
         line += "（値の妥当性はモデル側・運用で確認してください）。"
     if key not in _PER_USER_SETTING_KEYS:
         line += "\n※変更はボット全体（すべての Discord ユーザー）に反映されます。"
+    return True, line
+
+
+def cmd_set_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None, *, user_id=None):
+    if not isinstance(args, dict):
+        args = {}
+    key = str(args.get("key") or "").strip()
+    val = str(args.get("value") if args.get("value") is not None else "")
+    ok, line = set_setting_value(svc.config, key, val, user_id)
+    if not ok:
+        return (TEXT or "").strip(), "SET-SETTING 拒否", line, None, None
     return TEXT or "", f"SET-SETTING {key}", line, None, None
 
 

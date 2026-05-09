@@ -139,4 +139,10 @@ COMMAND_HANDLERS: dict[str, Any] = {
     "WEATHER": cmd_weather,
     "READ-PAGE": cmd_read_page,
 }
-COMMAND_HANDLERS.update(MEMORY_COMMAND_HANDLERS)
+COMMAND_HANDLERS.update(
+    {
+        name: handler
+        for name, handler in MEMORY_COMMAND_HANDLERS.items()
+        if name not in {"GET-SETTING", "SET-SETTING"}
+    }
+)
