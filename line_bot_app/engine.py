@@ -138,7 +138,13 @@ class LineBrain:
             self._config.allowed_chat_models,
         )
 
-    def _resolve_tool_notice_mode(self) -> ToolNoticeMode:
+    def _resolve_tool_notice_mode(self, override: str | None = None) -> ToolNoticeMode:
+        raw_override = (override or "").strip().lower()
+        if raw_override and raw_override != "inherit":
+            return parse_tool_notice_mode(
+                raw_override,
+                legacy_show_ri_text="true",
+            )
         return parse_tool_notice_mode(
             get_db_setting("tool_notice_display", ""),
             legacy_show_ri_text=get_db_setting("show_ri_text", "true"),
@@ -226,6 +232,7 @@ class LineBrain:
         user_text: str,
         *,
         on_line_message: Callable[[str], None] | None = None,
+        tool_notice_display_override: str | None = None,
     ) -> list[str]:
         """ユーザーへの送信パートの並び。`on_line_message` があるときは各パートを確定次第コールバックする。"""
         text = (user_text or "").strip()
@@ -239,7 +246,7 @@ class LineBrain:
 
         uid = user_id or "anonymous"
 
-        notice_mode = self._resolve_tool_notice_mode()
+        notice_mode = self._resolve_tool_notice_mode(tool_notice_display_override)
 
         messages = self._ensure_session(uid)
         boot_line = take_worker_boot_push_for_history(uid)

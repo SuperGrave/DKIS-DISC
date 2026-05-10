@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
+import time
 from typing import Any
 
 import requests
 
 _GEODECODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 _FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+_WEATHER_FETCH_ATTEMPTS = 3
+_WEATHER_RETRY_STATUS = frozenset({429, 502, 503, 504})
+_WEATHER_CACHE_TTL = timedelta(minutes=10)
+_weather_report_cache: dict[str, tuple[datetime, str]] = {}
+_DEFAULT_HEADERS = {
+    "User-Agent": "DKIS-DISC weather client (https://github.com/SuperGrave/DKIS-DISC)",
+    "Accept": "application/json",
+}
 
 _WMO_WEATHER_CODES: dict[int, str] = {
     0: "快晴",
@@ -37,19 +46,43 @@ def _decode_wmo(code: int) -> str:
     return _WMO_WEATHER_CODES.get(code, f"不明（コード{code}）")
 
 
+def _get_json_with_retry(url: str, *, params: dict[str, Any], timeout: float) -> tuple[dict[str, Any] | None, str | None]:
+    last_err: str | None = None
+    for attempt in range(_WEATHER_FETCH_ATTEMPTS):
+        try:
+            r = requests.get(url, params=params, timeout=timeout, headers=_DEFAULT_HEADERS)
+            if r.status_code in _WEATHER_RETRY_STATUS:
+                last_err = f"{r.status_code} Server Error"
+                if attempt < _WEATHER_FETCH_ATTEMPTS - 1:
+                    time.sleep(min(6.0, 1.5 * (2**attempt)))
+                    continue
+                return None, last_err
+            r.raise_for_status()
+            return r.json(), None
+        except requests.RequestException as exc:
+            last_err = str(exc)
+            if attempt < _WEATHER_FETCH_ATTEMPTS - 1:
+                time.sleep(min(6.0, 1.5 * (2**attempt)))
+                continue
+            return None, last_err
+        except ValueError as exc:
+            return None, f"JSON解析に失敗しました: {exc}"
+    return None, last_err or "リクエストに失敗しました"
+
+
 def geocode_place(name: str, *, timeout: float = 10.0) -> tuple[float, float, str] | None:
     """地名から緯度経度を解決。見つからなければ None。"""
     q = (name or "").strip()
     if not q:
         return None
     try:
-        r = requests.get(
+        data, err = _get_json_with_retry(
             _GEODECODE_URL,
             params={"name": q, "count": 1, "language": "ja"},
             timeout=timeout,
         )
-        r.raise_for_status()
-        data = r.json()
+        if err or data is None:
+            return None
         results = data.get("results") or []
         if not results:
             return None
@@ -75,9 +108,9 @@ def fetch_weather(lat: float, lon: float, location_label: str, *, timeout: float
         "timezone": "Asia/Tokyo",
         "forecast_days": 1,
     }
-    r = requests.get(_FORECAST_URL, params=params, timeout=timeout)
-    r.raise_for_status()
-    data = r.json()
+    data, err = _get_json_with_retry(_FORECAST_URL, params=params, timeout=timeout)
+    if err or data is None:
+        raise RuntimeError(err or "天気APIの取得に失敗しました")
     current = data.get("current", {})
     hourly = data.get("hourly", {})
     temps = hourly.get("temperature_2m", [])[:24]
@@ -119,6 +152,12 @@ def fetch_weather_report(place: str, *, timeout: float = 12.0) -> str:
     if not raw:
         return "内部エラー: 地名が空です。"
 
+    cache_key = raw.casefold()
+    now = datetime.now()
+    cached = _weather_report_cache.get(cache_key)
+    if cached and now - cached[0] < _WEATHER_CACHE_TTL:
+        return cached[1] + "\n（短時間の再取得を避けるため、直近の天気結果を再利用しました）"
+
     geo = geocode_place(raw, timeout=timeout)
     if not geo:
         return f"地点「{raw}」の緯度経度が解決できませんでした。別の表記（市区町村名など）で試してください。"
@@ -126,6 +165,13 @@ def fetch_weather_report(place: str, *, timeout: float = 12.0) -> str:
     lat, lon, label = geo
     try:
         w = fetch_weather(lat, lon, label, timeout=timeout)
-        return format_weather_text(w)
+        report = format_weather_text(w)
+        _weather_report_cache[cache_key] = (now, report)
+        return report
     except Exception as e:
-        return f"天気APIの取得に失敗しました: {e}"
+        if cached:
+            return cached[1] + f"\n（天気APIの再取得に失敗したため、前回結果を表示しています: {e}）"
+        return (
+            f"天気APIの取得に失敗しました: {e}\n"
+            "Open-Meteo 側の一時的なレート制限や混雑の可能性があります。少し時間を置いて再試行してください。"
+        )

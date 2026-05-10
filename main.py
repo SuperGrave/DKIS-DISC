@@ -24,7 +24,13 @@ from line_bot_app.config import load_config
 from line_bot_app.config import AppConfig
 from line_bot_app.commands_memory import build_settings_text, set_setting_value
 from line_bot_app.line_messages import split_line_text
-from line_bot_app.supabase_store import remember_discord_user_for_push
+from line_bot_app.supabase_store import (
+    CHANNEL_RESPONSE_MODES,
+    CHANNEL_TOOL_NOTICE_VALUES,
+    get_channel_settings,
+    remember_discord_user_for_push,
+    set_channel_setting,
+)
 from line_bot_app.user_messages import MSG_SYSTEM_FAILURE
 
 logger = logging.getLogger("dkis_disc")
@@ -32,6 +38,7 @@ DISCORD_HTTP_USER_AGENT = "DKIS-DISC (https://github.com/SuperGrave/DKIS-DISC, 1
 DISCORD_ADMINISTRATOR_PERMISSION = 0x8
 USER_SETTING_KEYS = frozenset({"notify_worker_restart"})
 ADMIN_SETTING_KEYS = frozenset({"current_model", "show_ri_text", "tool_notice_display", "text.use_raw_result"})
+CHANNEL_SETTING_KEYS = frozenset({"response_mode", "tool_notice_display"})
 
 
 @dataclass(frozen=True)
@@ -114,9 +121,27 @@ def _strip_bot_mention(client: discord.Client, text: str) -> str:
     return text.replace(client.user.mention, "").strip()
 
 
-def _message_targets_bot(client: discord.Client, message: discord.Message, mode: str) -> tuple[bool, str]:
+def _message_targets_bot(
+    client: discord.Client,
+    message: discord.Message,
+    mode: str,
+    *,
+    response_mode_override: str = "inherit",
+) -> tuple[bool, str]:
     text = (message.content or "").strip()
-    if not text or mode == "slash_only":
+    if not text:
+        return False, ""
+    response_mode = (response_mode_override or "inherit").strip().lower()
+    if response_mode == "off":
+        return False, ""
+    if response_mode == "normal":
+        return True, text
+    if response_mode == "mention":
+        if client.user not in message.mentions:
+            return False, ""
+        text = _strip_bot_mention(client, text)
+        return bool(text), text
+    if mode == "slash_only":
         return False, ""
     if mode == "all":
         return True, text
@@ -146,6 +171,7 @@ async def _reply_with_streaming(
     uid: str,
     user_text: str,
     channel: discord.abc.Messageable,
+    tool_notice_display_override: str | None = None,
 ) -> None:
     """AIが確定した応答パートをDiscordへ逐次送信する。"""
     loop = asyncio.get_running_loop()
@@ -160,6 +186,7 @@ async def _reply_with_streaming(
                 uid,
                 user_text,
                 on_line_message=on_line_message,
+                tool_notice_display_override=tool_notice_display_override,
             )
 
     await asyncio.to_thread(
@@ -202,6 +229,10 @@ def _connected_channel_count(client: discord.Client) -> int:
     return total
 
 
+def _connected_guild_count(client: discord.Client) -> int:
+    return len(client.guilds)
+
+
 def _status_mode(channel_count: int) -> str:
     raw = (os.environ.get("DISCORD_STATUS_MODE") or "auto").strip().lower()
     if raw in {"run", "running"}:
@@ -214,6 +245,7 @@ def _status_mode(channel_count: int) -> str:
 
 
 async def _update_presence_once(client: discord.Client) -> None:
+    guild_count = _connected_guild_count(client)
     channel_count = _connected_channel_count(client)
     mode = _status_mode(channel_count)
     if mode == "sleep":
@@ -223,7 +255,7 @@ async def _update_presence_once(client: discord.Client) -> None:
         )
         return
 
-    label = f"run in {channel_count}ch - {_ram_usage_label()}"
+    label = f"run in {guild_count}sv・{channel_count}ch - {_ram_usage_label()}"
     await client.change_presence(
         status=discord.Status.online,
         activity=discord.Activity(type=discord.ActivityType.watching, name=label),
@@ -289,6 +321,10 @@ def _interaction_raw_user_id(payload: dict) -> str:
     return str(user.get("id") or "").strip()
 
 
+def _interaction_channel_id(payload: dict) -> str:
+    return str(payload.get("channel_id") or "").strip()
+
+
 def _interaction_is_admin(payload: dict) -> bool:
     raw_id = _interaction_raw_user_id(payload)
     if raw_id and raw_id in _admin_user_ids():
@@ -320,6 +356,27 @@ def _format_setting_permission_error(key: str) -> str:
     return (
         f"`{key}` はボット全体に影響する設定なので、Discord管理者または "
         "`DISCORD_ADMIN_USER_IDS` に登録されたユーザーだけ変更できます。"
+    )
+
+
+def _channel_setting_key_choices() -> list[dict]:
+    return [{"name": key, "value": key} for key in sorted(CHANNEL_SETTING_KEYS)]
+
+
+def _choice_list(values: frozenset[str]) -> list[dict]:
+    return [{"name": value, "value": value} for value in sorted(values)]
+
+
+def _resolve_interaction_channel_option(payload: dict, options: dict[str, str]) -> str:
+    return (options.get("channel") or _interaction_channel_id(payload)).strip()
+
+
+def _format_channel_settings_text(channel_id: str) -> str:
+    settings = get_channel_settings(channel_id)
+    return (
+        f"channel_id: {channel_id or '(unknown)'}\n"
+        f"response_mode: {settings.get('response_mode', 'inherit')}\n"
+        f"tool_notice_display: {settings.get('tool_notice_display', 'inherit')}"
     )
 
 
@@ -358,6 +415,21 @@ def _build_interaction_command_response(runtime: BotRuntime, payload: dict) -> d
             ok, line = set_setting_value(runtime.config, key, value, uid)
             return _interaction_message_response(line)
 
+        if command == "channel_setting_get":
+            channel_id = _resolve_interaction_channel_option(payload, options)
+            return _interaction_message_response(_format_channel_settings_text(channel_id))
+
+        if command == "channel_setting_set":
+            if not _interaction_is_admin(payload):
+                return _interaction_message_response(
+                    "チャンネル設定はDiscord管理者または `DISCORD_ADMIN_USER_IDS` のユーザーだけ変更できます。"
+                )
+            channel_id = _resolve_interaction_channel_option(payload, options)
+            key = (options.get("key") or "").strip()
+            value = (options.get("value") or "").strip()
+            ok, line = set_channel_setting(channel_id, key, value)
+            return _interaction_message_response(line)
+
         return _interaction_message_response("未対応のコマンドです。")
     except Exception:
         logger.exception("Discord interaction command failed")
@@ -374,7 +446,7 @@ def _handle_discord_interaction(runtime: BotRuntime, payload: dict) -> dict:
 
     data = payload.get("data") or {}
     name = str(data.get("name") or "").lower()
-    if name not in {"setting_get", "setting_set", "setting_model"}:
+    if name not in {"setting_get", "setting_set", "setting_model", "channel_setting_get", "channel_setting_set"}:
         return _interaction_message_response("未対応のコマンドです。")
 
     return _build_interaction_command_response(runtime, payload)
@@ -491,6 +563,46 @@ def _discord_command_definitions(config: AppConfig) -> list[dict]:
                 }
             ],
         },
+        {
+            "name": "channel_setting_get",
+            "description": "現在または指定チャンネルのDKIS-DISCチャンネル設定を表示します。",
+            "type": 1,
+            "options": [
+                {
+                    "type": 7,
+                    "name": "channel",
+                    "description": "確認するチャンネル（未指定なら現在チャンネル）",
+                    "required": False,
+                }
+            ],
+        },
+        {
+            "name": "channel_setting_set",
+            "description": "チャンネルごとの会話入口・通知表示を変更します（管理者のみ）。",
+            "type": 1,
+            "options": [
+                {
+                    "type": 3,
+                    "name": "key",
+                    "description": "変更するチャンネル設定キー",
+                    "required": True,
+                    "choices": _channel_setting_key_choices(),
+                },
+                {
+                    "type": 3,
+                    "name": "value",
+                    "description": "保存する値",
+                    "required": True,
+                    "choices": _choice_list(CHANNEL_RESPONSE_MODES | CHANNEL_TOOL_NOTICE_VALUES),
+                },
+                {
+                    "type": 7,
+                    "name": "channel",
+                    "description": "変更するチャンネル（未指定なら現在チャンネル）",
+                    "required": False,
+                },
+            ],
+        },
     ]
 
 
@@ -577,7 +689,13 @@ def create_bot(runtime: BotRuntime | None = None) -> discord.Client:
     async def on_message(message: discord.Message) -> None:
         if message.author.bot:
             return
-        should_reply, user_text = _message_targets_bot(client, message, message_mode)
+        channel_settings = get_channel_settings(message.channel.id)
+        should_reply, user_text = _message_targets_bot(
+            client,
+            message,
+            message_mode,
+            response_mode_override=channel_settings.get("response_mode", "inherit"),
+        )
         if not should_reply:
             return
 
@@ -599,6 +717,7 @@ def create_bot(runtime: BotRuntime | None = None) -> discord.Client:
                     uid=uid,
                     user_text=user_text,
                     channel=message.channel,
+                    tool_notice_display_override=channel_settings.get("tool_notice_display", "inherit"),
                 )
         except Exception:
             logger.exception("AI reply generation or Discord send failed")

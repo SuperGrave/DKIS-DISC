@@ -28,6 +28,12 @@ _filename_safe_re = re.compile(r"^[\w\-\.\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf
 MAX_FILENAME_LEN = 200
 MAX_MEMORY_CONTENT_CHARS = 500_000
 MID_TERM_NOTE_MAX_CHARS = 200
+CHANNEL_RESPONSE_MODES = frozenset({"inherit", "normal", "mention", "off"})
+CHANNEL_TOOL_NOTICE_VALUES = frozenset({"inherit", "full", "abbrev", "minimal", "hidden"})
+DEFAULT_CHANNEL_SETTINGS = {
+    "response_mode": "inherit",
+    "tool_notice_display": "inherit",
+}
 
 _client_cache: Any = None
 
@@ -98,6 +104,80 @@ def set_db_setting(key: str, value: str) -> tuple[bool, str]:
             on_conflict="setting_key",
         ).execute()
         return True, ""
+    except Exception as exc:
+        return False, str(exc)
+
+
+def normalize_channel_id(channel_id: str | int | None) -> str:
+    return str(channel_id or "").strip()
+
+
+def get_channel_settings(channel_id: str | int | None) -> dict[str, str]:
+    """Discord channel_id ごとの会話入口・通知表示設定。未設定時は inherit。"""
+    cid = normalize_channel_id(channel_id)
+    out = dict(DEFAULT_CHANNEL_SETTINGS)
+    if not cid:
+        return out
+    sb = _client()
+    if sb is None:
+        return out
+    try:
+        r = (
+            sb.table("channel_settings")
+            .select("response_mode,tool_notice_display")
+            .eq("channel_id", cid)
+            .limit(1)
+            .execute()
+        )
+        rows = r.data or []
+        if not rows:
+            return out
+        row = rows[0]
+        response_mode = str(row.get("response_mode") or "inherit").strip().lower()
+        tool_notice_display = str(row.get("tool_notice_display") or "inherit").strip().lower()
+        if response_mode in CHANNEL_RESPONSE_MODES:
+            out["response_mode"] = response_mode
+        if tool_notice_display in CHANNEL_TOOL_NOTICE_VALUES:
+            out["tool_notice_display"] = tool_notice_display
+        return out
+    except Exception:
+        return out
+
+
+def set_channel_setting(channel_id: str | int | None, key: str, value: str) -> tuple[bool, str]:
+    """channel_settings の単一キーを保存する。"""
+    cid = normalize_channel_id(channel_id)
+    if not cid:
+        return False, "channel_id が空です。"
+    k = (key or "").strip()
+    v = (value or "").strip().lower()
+    if k == "response_mode":
+        if v not in CHANNEL_RESPONSE_MODES:
+            return False, f"response_mode は {sorted(CHANNEL_RESPONSE_MODES)} のいずれかです。"
+    elif k == "tool_notice_display":
+        if v not in CHANNEL_TOOL_NOTICE_VALUES:
+            return False, f"tool_notice_display は {sorted(CHANNEL_TOOL_NOTICE_VALUES)} のいずれかです。"
+    else:
+        return False, "key は response_mode または tool_notice_display です。"
+    sb = _client()
+    if sb is None:
+        return False, "Supabase が未設定です（SUPABASE_URL / SUPABASE_KEY）。"
+    current = get_channel_settings(cid)
+    current[k] = v
+    try:
+        sb.table("channel_settings").upsert(
+            {
+                "channel_id": cid,
+                "response_mode": current["response_mode"],
+                "tool_notice_display": current["tool_notice_display"],
+                "updated_at": _now_iso(),
+            },
+            on_conflict="channel_id",
+        ).execute()
+        return True, (
+            f"channel {cid} の {k} を {v} にしました。\n"
+            f"response_mode={current['response_mode']} / tool_notice_display={current['tool_notice_display']}"
+        )
     except Exception as exc:
         return False, str(exc)
 
