@@ -243,13 +243,6 @@ def _verify_discord_interaction(body: bytes, headers) -> bool:
         return False
 
 
-def _interaction_option_value(data: dict, name: str) -> str:
-    for option in data.get("options") or []:
-        if option.get("name") == name:
-            return str(option.get("value") or "").strip()
-    return ""
-
-
 def _interaction_options(data: dict) -> dict[str, str]:
     return {str(option.get("name") or ""): str(option.get("value") or "") for option in data.get("options") or []}
 
@@ -279,10 +272,6 @@ def _interaction_is_admin(payload: dict) -> bool:
     return bool(permissions & DISCORD_ADMINISTRATOR_PERMISSION)
 
 
-def _discord_followup_url(application_id: str, interaction_token: str) -> str:
-    return f"https://discord.com/api/v10/webhooks/{application_id}/{interaction_token}"
-
-
 def _discord_json_headers(*, token: str | None = None) -> dict[str, str]:
     headers = {
         "Content-Type": "application/json; charset=utf-8",
@@ -292,33 +281,6 @@ def _discord_json_headers(*, token: str | None = None) -> dict[str, str]:
     if token:
         headers["Authorization"] = f"Bot {token}"
     return headers
-
-
-def _post_discord_webhook(url: str, content: str, *, ephemeral: bool = False) -> None:
-    payload = {
-        "content": content,
-        "allowed_mentions": {"parse": []},
-    }
-    if ephemeral:
-        payload["flags"] = 64
-    data = json.dumps(
-        payload,
-        ensure_ascii=False,
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        url,
-        data=data,
-        headers=_discord_json_headers(),
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        if response.status >= 300:
-            raise RuntimeError(f"Discord followup failed: HTTP {response.status}")
-
-
-def _post_discord_webhook_chunks(url: str, text: str, *, ephemeral: bool = False) -> None:
-    for chunk in split_line_text(text):
-        _post_discord_webhook(url, chunk, ephemeral=ephemeral)
 
 
 def _setting_requires_admin(key: str) -> bool:
@@ -332,70 +294,61 @@ def _format_setting_permission_error(key: str) -> str:
     )
 
 
-def _run_interaction_command(runtime: BotRuntime, payload: dict) -> None:
+def _interaction_message_response(content: str, *, ephemeral: bool = True) -> dict:
+    chunks = split_line_text(content, max_chunks=1)
+    data: dict = {
+        "content": chunks[0] if chunks else MSG_SYSTEM_FAILURE,
+        "allowed_mentions": {"parse": []},
+    }
+    if ephemeral:
+        data["flags"] = 64
+    return {"type": 4, "data": data}
+
+
+def _build_interaction_command_response(runtime: BotRuntime, payload: dict) -> dict:
     data = payload.get("data") or {}
     command = str(data.get("name") or "").lower()
     options = _interaction_options(data)
-    application_id = str(payload.get("application_id") or "").strip()
-    token = str(payload.get("token") or "").strip()
-    webhook_url = _discord_followup_url(application_id, token)
     uid = _interaction_user_id(payload)
 
     try:
         if command == "setting_get":
-            _post_discord_webhook_chunks(webhook_url, build_settings_text(runtime.config, uid), ephemeral=True)
-            return
+            return _interaction_message_response(build_settings_text(runtime.config, uid))
 
         if command == "setting_model":
             if not _interaction_is_admin(payload):
-                _post_discord_webhook(webhook_url, _format_setting_permission_error("current_model"), ephemeral=True)
-                return
+                return _interaction_message_response(_format_setting_permission_error("current_model"))
             ok, line = set_setting_value(runtime.config, "current_model", options.get("model", ""), uid)
-            _post_discord_webhook(webhook_url, line, ephemeral=True)
-            return
+            return _interaction_message_response(line)
 
         if command == "setting_set":
             key = (options.get("key") or "").strip()
             value = options.get("value") or ""
             if _setting_requires_admin(key) and not _interaction_is_admin(payload):
-                _post_discord_webhook(webhook_url, _format_setting_permission_error(key), ephemeral=True)
-                return
+                return _interaction_message_response(_format_setting_permission_error(key))
             ok, line = set_setting_value(runtime.config, key, value, uid)
-            _post_discord_webhook_chunks(webhook_url, line, ephemeral=True)
-            return
+            return _interaction_message_response(line)
 
-        _post_discord_webhook(webhook_url, "未対応のコマンドです。", ephemeral=True)
+        return _interaction_message_response("未対応のコマンドです。")
     except Exception:
         logger.exception("Discord interaction command failed")
-        try:
-            _post_discord_webhook(webhook_url, MSG_SYSTEM_FAILURE, ephemeral=True)
-        except Exception:
-            logger.exception("Discord interaction failure message send failed")
+        return _interaction_message_response(MSG_SYSTEM_FAILURE)
 
 
-def _handle_discord_interaction(payload: dict) -> tuple[dict, bool]:
+def _handle_discord_interaction(runtime: BotRuntime, payload: dict) -> dict:
     interaction_type = payload.get("type")
     if interaction_type == 1:
-        return {"type": 1}, False
+        return {"type": 1}
 
     if interaction_type != 2:
-        return {"type": 4, "data": {"content": "未対応のInteractionです。", "flags": 64}}, False
+        return _interaction_message_response("未対応のInteractionです。")
 
     data = payload.get("data") or {}
     name = str(data.get("name") or "").lower()
     if name not in {"setting_get", "setting_set", "setting_model"}:
-        return {"type": 4, "data": {"content": "未対応のコマンドです。", "flags": 64}}, False
+        return _interaction_message_response("未対応のコマンドです。")
 
-    return {"type": 5, "data": {"flags": 64}}, True
-
-
-def _start_interaction_reply_thread(runtime: BotRuntime, payload: dict) -> None:
-    threading.Thread(
-        target=_run_interaction_command,
-        args=(runtime, payload),
-        name="discord-interaction-command",
-        daemon=True,
-    ).start()
+    return _build_interaction_command_response(runtime, payload)
 
 
 def _start_health_server(runtime: BotRuntime) -> None:
@@ -421,10 +374,7 @@ def _start_health_server(runtime: BotRuntime) -> None:
                 _json_response(self, 400, {"ok": False, "error": "invalid_json"})
                 return
 
-            response, should_followup = _handle_discord_interaction(payload)
-            _json_response(self, 200, response)
-            if should_followup:
-                _start_interaction_reply_thread(runtime, payload)
+            _json_response(self, 200, _handle_discord_interaction(runtime, payload))
 
         def log_message(self, format: str, *args: object) -> None:
             logger.debug("health server: " + format, *args)
