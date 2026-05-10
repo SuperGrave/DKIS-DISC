@@ -196,9 +196,32 @@ def _connected_channel_count(client: discord.Client) -> int:
     return total
 
 
+def _status_mode(channel_count: int) -> str:
+    raw = (os.environ.get("DISCORD_STATUS_MODE") or "auto").strip().lower()
+    if raw in {"run", "running"}:
+        return "run"
+    if raw in {"sleep", "idle"}:
+        return "sleep"
+    if raw != "auto":
+        logger.warning("Unknown DISCORD_STATUS_MODE=%r; using auto", raw)
+    return "run" if channel_count > 0 else "sleep"
+
+
 async def _update_presence_once(client: discord.Client) -> None:
-    label = f"{_connected_channel_count(client)}ch接続中・{_ram_usage_label()}"
-    await client.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name=label))
+    channel_count = _connected_channel_count(client)
+    mode = _status_mode(channel_count)
+    if mode == "sleep":
+        await client.change_presence(
+            status=discord.Status.idle,
+            activity=discord.Activity(type=discord.ActivityType.watching, name="sleep"),
+        )
+        return
+
+    label = f"run in {channel_count}ch - {_ram_usage_label()}"
+    await client.change_presence(
+        status=discord.Status.online,
+        activity=discord.Activity(type=discord.ActivityType.watching, name=label),
+    )
 
 
 async def _presence_loop(client: discord.Client) -> None:
