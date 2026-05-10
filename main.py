@@ -192,7 +192,13 @@ def _ram_usage_label() -> str:
 def _connected_channel_count(client: discord.Client) -> int:
     total = 0
     for guild in client.guilds:
-        total += len(guild.text_channels)
+        me = guild.me
+        if me is None:
+            continue
+        for channel in guild.text_channels:
+            permissions = channel.permissions_for(me)
+            if permissions.view_channel and permissions.send_messages and permissions.read_message_history:
+                total += 1
     return total
 
 
