@@ -548,6 +548,10 @@ def _start_self_ping() -> None:
             try:
                 with urllib.request.urlopen(url, timeout=15) as response:
                     logger.info("Keepalive ping: %s -> %s", url, response.status)
+            except urllib.error.HTTPError as exc:
+                logger.warning("Keepalive ping returned HTTP %s: %s", exc.code, url)
+            except urllib.error.URLError as exc:
+                logger.warning("Keepalive ping could not reach %s: %s", url, exc.reason)
             except Exception:
                 logger.exception("Keepalive ping failed")
 
