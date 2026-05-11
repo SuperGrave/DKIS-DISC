@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
 -- enabled:
 --   true  ... このチャンネルでDKIS-DISCを利用する
 --   false ... Discord表示「無効」。管理者の /channel_setting_set enabled on 以外は受け付けない
+--   未登録チャンネルはアプリ側でも無効として扱う
 -- response_mode:
 --   inherit ... グローバル DISCORD_MESSAGE_MODE / DISCORD_CHANNEL_ID に従う
 --   normal  ... 通常メッセージすべてに反応
@@ -34,7 +35,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
 --   full | abbrev | minimal | hidden ... チャンネルごとに上書き
 CREATE TABLE IF NOT EXISTS channel_settings (
     channel_id TEXT PRIMARY KEY,
-    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
     response_mode TEXT NOT NULL DEFAULT 'inherit',
     tool_notice_display TEXT NOT NULL DEFAULT 'inherit',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -68,13 +69,14 @@ ALTER TABLE known_line_users ADD COLUMN IF NOT EXISTS mid_term_note TEXT NOT NUL
 
 CREATE TABLE IF NOT EXISTS channel_settings (
     channel_id TEXT PRIMARY KEY,
-    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
     response_mode TEXT NOT NULL DEFAULT 'inherit',
     tool_notice_display TEXT NOT NULL DEFAULT 'inherit',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 ALTER TABLE channel_settings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE channel_settings ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE channel_settings ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE channel_settings ALTER COLUMN enabled SET DEFAULT FALSE;
 ALTER TABLE channel_settings ADD COLUMN IF NOT EXISTS response_mode TEXT NOT NULL DEFAULT 'inherit';
 ALTER TABLE channel_settings ADD COLUMN IF NOT EXISTS tool_notice_display TEXT NOT NULL DEFAULT 'inherit';
 ALTER TABLE channel_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();

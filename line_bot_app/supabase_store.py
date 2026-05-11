@@ -32,7 +32,7 @@ CHANNEL_ENABLED_VALUES = frozenset({"on", "off", "enabled", "disabled", "true", 
 CHANNEL_RESPONSE_MODES = frozenset({"inherit", "normal", "mention", "off"})
 CHANNEL_TOOL_NOTICE_VALUES = frozenset({"inherit", "full", "abbrev", "minimal", "hidden"})
 DEFAULT_CHANNEL_SETTINGS = {
-    "enabled": "on",
+    "enabled": "off",
     "response_mode": "inherit",
     "tool_notice_display": "inherit",
 }
@@ -141,7 +141,7 @@ def get_channel_settings(channel_id: str | int | None) -> dict[str, str]:
         if isinstance(enabled, bool):
             out["enabled"] = "on" if enabled else "off"
         else:
-            enabled_text = str(enabled if enabled is not None else "on").strip().lower()
+            enabled_text = str(enabled if enabled is not None else "off").strip().lower()
             if enabled_text in {"false", "0", "no", "off"}:
                 out["enabled"] = "off"
             elif enabled_text in {"true", "1", "yes", "on"}:

@@ -211,13 +211,13 @@ def _ram_usage_label() -> str:
     current = _read_int_file("/sys/fs/cgroup/memory.current")
     limit = _read_int_file("/sys/fs/cgroup/memory.max")
     if current is None or limit is None or limit <= 0:
-        return "RAM --%"
+        return "RAM--%"
     pct = max(0, min(999, round(current / limit * 100)))
-    return f"RAM {pct}%"
+    return f"RAM{pct}%"
 
 
 def _channel_is_enabled(channel_id: str | int | None) -> bool:
-    return get_channel_settings(channel_id).get("enabled", "on") == "on"
+    return get_channel_settings(channel_id).get("enabled", "off") == "on"
 
 
 def _connected_channel_counts(client: discord.Client) -> tuple[int, int]:
@@ -248,6 +248,7 @@ def _status_mode(channel_count: int) -> str:
 
 
 async def _update_presence_once(client: discord.Client) -> None:
+    guild_count = len(client.guilds)
     enabled_channel_count, channel_count = _connected_channel_counts(client)
     mode = _status_mode(enabled_channel_count)
     if mode == "sleep":
@@ -257,7 +258,7 @@ async def _update_presence_once(client: discord.Client) -> None:
         )
         return
 
-    label = f"run in {enabled_channel_count}/{channel_count}ch・{_ram_usage_label()}"
+    label = f"run in {guild_count}sb({enabled_channel_count}/{channel_count}ch) {_ram_usage_label()}"
     await client.change_presence(
         status=discord.Status.online,
         activity=discord.Activity(type=discord.ActivityType.watching, name=label),
@@ -386,7 +387,7 @@ def _format_channel_settings_text(channel_id: str) -> str:
     settings = get_channel_settings(channel_id)
     return (
         f"channel_id: {channel_id or '(unknown)'}\n"
-        f"enabled: {settings.get('enabled', 'on')}\n"
+        f"enabled: {settings.get('enabled', 'off')}\n"
         f"response_mode: {settings.get('response_mode', 'inherit')}\n"
         f"tool_notice_display: {settings.get('tool_notice_display', 'inherit')}"
     )
@@ -737,7 +738,7 @@ def create_bot(runtime: BotRuntime | None = None) -> discord.Client:
         if message.author.bot:
             return
         channel_settings = get_channel_settings(message.channel.id)
-        if channel_settings.get("enabled", "on") != "on":
+        if channel_settings.get("enabled", "off") != "on":
             return
         should_reply, user_text = _message_targets_bot(
             client,
