@@ -25,6 +25,7 @@ Discord 上で動作する **DKIS 互換の軽量 AI ボット**です。`discor
 - `DKIS_SETTINGS_PATH`（既定はリポジトリ内の `dist/settings.json`）
 - `GOOGLE_API_KEY` / `GOOGLE_CX`（`SEARCH` 用）
 - `SUPABASE_URL` / `SUPABASE_KEY`（記憶コマンド用。未設定なら記憶系は案内エラーのみ）
+- `DISCORD_COMMAND_REGISTRATION_SCOPE`（既定 `global`。`guild` は即時反映テスト用、`both` は二重表示に注意）
 - `DISCORD_RESTART_ALLOWED_USER_IDS`（カンマ区切り。未設定時は Discord サーバー管理者だけが再起動可能）
 - `DISCORD_BOOT_GREETING_PUSH_STORE_LIMIT`（既定 `50`）
 - `DISCORD_BOOT_GREETING_SKIP_STORED_IDS`（`1` で DB の起動通知オプトインを無視）
@@ -64,6 +65,6 @@ uv run python dev_console.py
 5. スリープ対策を使う場合は `KEEPALIVE_URL=https://<サービス名>.onrender.com/` を設定します。
 6. GitHub Actions の定期 ping を使う場合は Repository Variables に `KEEPALIVE_URL` を設定します。未設定時は `https://dkis-disc.onrender.com/` を5分ごとに叩きます。
 
-スラッシュコマンドは起動時にグローバル登録されるため、Bot を招待した各サーバーで使えます。反映を急ぎたいテストサーバーがある場合は `DISCORD_GUILD_ID` または `DISCORD_GUILD_IDS` にサーバーIDを入れると、そのサーバーにも即時反映用として登録します。
+スラッシュコマンドは起動時にグローバル登録されるため、Bot を招待した各サーバーで使えます。反映を急ぎたいテストサーバーだけに登録したい場合は `DISCORD_COMMAND_REGISTRATION_SCOPE=guild` と `DISCORD_GUILD_ID` または `DISCORD_GUILD_IDS` を設定します。`both` は global/guild の同名コマンドがDiscord上で二重表示されることがあります。
 
 `main.py` は Discord bot と同時に軽量 HTTP ヘルスチェックサーバーを起動します。Render の Web Service として動かしても `GET /` が `{"ok": true, "service": "dkis-disc-bot"}` を返します。

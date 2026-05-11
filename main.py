@@ -34,7 +34,7 @@ from line_bot_app.supabase_store import (
 from line_bot_app.user_messages import MSG_SYSTEM_FAILURE
 
 logger = logging.getLogger("dkis_disc")
-DISCORD_HTTP_USER_AGENT = "DKIS-DISC (https://github.com/SuperGrave/DKIS-DISC, 1.0.1)"
+DISCORD_HTTP_USER_AGENT = "DKIS-DISC (https://github.com/SuperGrave/DKIS-DISC, 1.0.2)"
 DISCORD_ADMINISTRATOR_PERMISSION = 0x8
 USER_SETTING_KEYS = frozenset({"notify_worker_restart"})
 ADMIN_SETTING_KEYS = frozenset({"current_model", "show_ri_text", "tool_notice_display", "text.use_raw_result"})
@@ -369,6 +369,14 @@ def _discord_command_guild_ids() -> list[str]:
     return guild_ids
 
 
+def _discord_command_registration_scope() -> str:
+    raw = (os.environ.get("DISCORD_COMMAND_REGISTRATION_SCOPE") or "global").strip().lower()
+    if raw in {"global", "guild", "both"}:
+        return raw
+    logger.warning("Unknown DISCORD_COMMAND_REGISTRATION_SCOPE=%r; using global", raw)
+    return "global"
+
+
 def _setting_requires_admin(key: str) -> bool:
     return key in ADMIN_SETTING_KEYS
 
@@ -681,20 +689,34 @@ def _register_discord_commands(config: AppConfig) -> None:
         logger.info("Discord command registration skipped; DISCORD_APPLICATION_ID or token is not set")
         return
 
-    data = json.dumps(_discord_command_definitions(config), ensure_ascii=False).encode("utf-8")
-    urls = [("global", f"https://discord.com/api/v10/applications/{application_id}/commands")]
-    urls.extend(
+    commands_data = json.dumps(_discord_command_definitions(config), ensure_ascii=False).encode("utf-8")
+    empty_data = b"[]"
+    global_url = f"https://discord.com/api/v10/applications/{application_id}/commands"
+    guild_urls = [
         (
             f"guild:{guild_id}",
             f"https://discord.com/api/v10/applications/{application_id}/guilds/{guild_id}/commands",
         )
         for guild_id in _discord_command_guild_ids()
-    )
+    ]
+    scope = _discord_command_registration_scope()
+    requests: list[tuple[str, str, bytes]] = []
+    if scope in {"global", "both"}:
+        requests.append(("global", global_url, commands_data))
+    if scope in {"guild", "both"}:
+        if guild_urls:
+            requests.extend((label, url, commands_data) for label, url in guild_urls)
+        else:
+            logger.warning("DISCORD_COMMAND_REGISTRATION_SCOPE=%s but DISCORD_GUILD_ID(S) is not set", scope)
+    if scope == "global":
+        requests.extend((f"{label}:clear", url, empty_data) for label, url in guild_urls)
+    elif scope == "guild" and guild_urls:
+        requests.append(("global:clear", global_url, empty_data))
 
-    for label, url in urls:
+    for label, url, payload in requests:
         request = urllib.request.Request(
             url,
-            data=data,
+            data=payload,
             headers=_discord_json_headers(token=token),
             method="PUT",
         )
