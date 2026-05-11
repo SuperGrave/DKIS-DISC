@@ -351,6 +351,24 @@ def _discord_json_headers(*, token: str | None = None) -> dict[str, str]:
     return headers
 
 
+def _discord_command_guild_ids() -> list[str]:
+    raw = ",".join(
+        [
+            os.environ.get("DISCORD_GUILD_ID") or "",
+            os.environ.get("DISCORD_GUILD_IDS") or "",
+        ]
+    )
+    seen: set[str] = set()
+    guild_ids: list[str] = []
+    for item in raw.split(","):
+        guild_id = item.strip()
+        if not guild_id or guild_id in seen:
+            continue
+        seen.add(guild_id)
+        guild_ids.append(guild_id)
+    return guild_ids
+
+
 def _setting_requires_admin(key: str) -> bool:
     return key in ADMIN_SETTING_KEYS
 
@@ -663,27 +681,31 @@ def _register_discord_commands(config: AppConfig) -> None:
         logger.info("Discord command registration skipped; DISCORD_APPLICATION_ID or token is not set")
         return
 
-    guild_id = (os.environ.get("DISCORD_GUILD_ID") or "").strip()
-    if guild_id:
-        url = f"https://discord.com/api/v10/applications/{application_id}/guilds/{guild_id}/commands"
-    else:
-        url = f"https://discord.com/api/v10/applications/{application_id}/commands"
-
     data = json.dumps(_discord_command_definitions(config), ensure_ascii=False).encode("utf-8")
-    request = urllib.request.Request(
-        url,
-        data=data,
-        headers=_discord_json_headers(token=token),
-        method="PUT",
+    urls = [("global", f"https://discord.com/api/v10/applications/{application_id}/commands")]
+    urls.extend(
+        (
+            f"guild:{guild_id}",
+            f"https://discord.com/api/v10/applications/{application_id}/guilds/{guild_id}/commands",
+        )
+        for guild_id in _discord_command_guild_ids()
     )
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            logger.info("Discord command bulk registration: HTTP %s", response.status)
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        logger.error("Discord command registration failed: HTTP %s %s", exc.code, body)
-    except Exception:
-        logger.exception("Discord command registration failed")
+
+    for label, url in urls:
+        request = urllib.request.Request(
+            url,
+            data=data,
+            headers=_discord_json_headers(token=token),
+            method="PUT",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                logger.info("Discord command bulk registration (%s): HTTP %s", label, response.status)
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            logger.error("Discord command registration failed (%s): HTTP %s %s", label, exc.code, body)
+        except Exception:
+            logger.exception("Discord command registration failed (%s)", label)
 
 
 def create_bot(runtime: BotRuntime | None = None) -> discord.Client:

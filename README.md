@@ -62,4 +62,6 @@ uv run python dev_console.py
 4. 環境変数に `DISCORD_BOT_TOKEN`、`DISCORD_CHANNEL_ID`、`OPENAI_API_KEY` を設定します。
 5. スリープ対策を使う場合は `KEEPALIVE_URL=https://<サービス名>.onrender.com/` を設定します。
 
+スラッシュコマンドは起動時にグローバル登録されるため、Bot を招待した各サーバーで使えます。反映を急ぎたいテストサーバーがある場合は `DISCORD_GUILD_ID` または `DISCORD_GUILD_IDS` にサーバーIDを入れると、そのサーバーにも即時反映用として登録します。
+
 `main.py` は Discord bot と同時に軽量 HTTP ヘルスチェックサーバーを起動します。Render の Web Service として動かしても `GET /` が `{"ok": true, "service": "dkis-disc-bot"}` を返します。
