@@ -25,7 +25,6 @@ from line_bot_app.config import AppConfig
 from line_bot_app.commands_memory import build_settings_text, set_setting_value
 from line_bot_app.line_messages import split_line_text
 from line_bot_app.supabase_store import (
-    CHANNEL_ENABLED_VALUES,
     CHANNEL_RESPONSE_MODES,
     CHANNEL_TOOL_NOTICE_VALUES,
     get_channel_settings,
@@ -363,11 +362,20 @@ def _format_setting_permission_error(key: str) -> str:
 
 
 def _channel_setting_key_choices() -> list[dict]:
-    return [{"name": key, "value": key} for key in sorted(CHANNEL_SETTING_KEYS)]
+    return [
+        {"name": "利用ON/OFF（無効にすると復帰操作以外を拒否）", "value": "enabled"},
+        {"name": "応答モード", "value": "response_mode"},
+        {"name": "ツール通知表示", "value": "tool_notice_display"},
+    ]
 
 
-def _choice_list(values: frozenset[str]) -> list[dict]:
-    return [{"name": value, "value": value} for value in sorted(values)]
+def _channel_setting_value_choices() -> list[dict]:
+    return [
+        {"name": "有効（ON）", "value": "on"},
+        {"name": "無効（復帰操作以外拒否）", "value": "disabled"},
+        *[{"name": value, "value": value} for value in sorted(CHANNEL_RESPONSE_MODES)],
+        *[{"name": value, "value": value} for value in sorted(CHANNEL_TOOL_NOTICE_VALUES)],
+    ]
 
 
 def _resolve_interaction_channel_option(payload: dict, options: dict[str, str]) -> str:
@@ -404,8 +412,8 @@ def _is_channel_enable_command(command: str, options: dict[str, str]) -> bool:
 
 def _channel_disabled_response(channel_id: str) -> dict:
     return _interaction_message_response(
-        "このチャンネルはDKIS-DISCの利用設定がOFFです。\n"
-        f"管理者が `/channel_setting_set key:enabled value:on channel:{channel_id}` を実行するとONに戻せます。"
+        "このチャンネルはDKIS-DISCの利用設定が無効です。\n"
+        f"管理者が `/channel_setting_set key:利用ON/OFF value:有効 channel:{channel_id}` を実行すると有効に戻せます。"
     )
 
 
@@ -628,7 +636,7 @@ def _discord_command_definitions(config: AppConfig) -> list[dict]:
                     "name": "value",
                     "description": "保存する値",
                     "required": True,
-                    "choices": _choice_list(CHANNEL_ENABLED_VALUES | CHANNEL_RESPONSE_MODES | CHANNEL_TOOL_NOTICE_VALUES),
+                    "choices": _channel_setting_value_choices(),
                 },
                 {
                     "type": 7,

@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
 -- Discord チャンネル単位の会話入口・通知表示設定。
 -- enabled:
 --   true  ... このチャンネルでDKIS-DISCを利用する
---   false ... 管理者の /channel_setting_set enabled on 以外は受け付けない
+--   false ... Discord表示「無効」。管理者の /channel_setting_set enabled on 以外は受け付けない
 -- response_mode:
 --   inherit ... グローバル DISCORD_MESSAGE_MODE / DISCORD_CHANNEL_ID に従う
 --   normal  ... 通常メッセージすべてに反応

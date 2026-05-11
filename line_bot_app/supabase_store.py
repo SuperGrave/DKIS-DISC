@@ -28,7 +28,7 @@ _filename_safe_re = re.compile(r"^[\w\-\.\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf
 MAX_FILENAME_LEN = 200
 MAX_MEMORY_CONTENT_CHARS = 500_000
 MID_TERM_NOTE_MAX_CHARS = 200
-CHANNEL_ENABLED_VALUES = frozenset({"on", "off", "true", "false", "1", "0", "yes", "no"})
+CHANNEL_ENABLED_VALUES = frozenset({"on", "off", "enabled", "disabled", "true", "false", "1", "0", "yes", "no"})
 CHANNEL_RESPONSE_MODES = frozenset({"inherit", "normal", "mention", "off"})
 CHANNEL_TOOL_NOTICE_VALUES = frozenset({"inherit", "full", "abbrev", "minimal", "hidden"})
 DEFAULT_CHANNEL_SETTINGS = {
@@ -164,8 +164,8 @@ def set_channel_setting(channel_id: str | int | None, key: str, value: str) -> t
     v = (value or "").strip().lower()
     if k == "enabled":
         if v not in CHANNEL_ENABLED_VALUES:
-            return False, "enabled は on/off（または true/false、1/0、yes/no）です。"
-        v = "off" if v in {"off", "false", "0", "no"} else "on"
+            return False, "enabled は on/off、enabled/disabled（または true/false、1/0、yes/no）です。"
+        v = "off" if v in {"off", "disabled", "false", "0", "no"} else "on"
     elif k == "response_mode":
         if v not in CHANNEL_RESPONSE_MODES:
             return False, f"response_mode は {sorted(CHANNEL_RESPONSE_MODES)} のいずれかです。"
