@@ -13,7 +13,13 @@ from .config import AppConfig
 from .input_build import build_input_segments
 from .line_messages import split_line_text
 from .parsing import format_model_response_block, parse_ai_response
-from .supabase_store import get_db_setting, get_mid_term_note
+from .supabase_store import (
+    get_discord_user_settings,
+    get_mid_term_note,
+    record_discord_user_usage,
+    talking_memory_turns,
+    user_model_from_choice,
+)
 from .tool_notice import (
     ToolNoticeMode,
     format_normal_footer_line,
@@ -42,34 +48,41 @@ def _usage_from_response(response: object) -> dict:
     return out
 
 
-def _rt_arg_summary(command: str, args: object) -> str:
+def _keep_detail(text: str, *, limit: int) -> str:
+    s = text.strip()
+    if limit <= 0 or len(s) <= limit:
+        return s
+    return s[:limit] + "…"
+
+
+def _rt_arg_summary(command: str, args: object, *, limit: int = 120) -> str:
     if not isinstance(args, dict):
         args = {}
     if command == "SEARCH":
         q = str(args.get("query") or "").strip()
-        return (q[:120] + "…") if len(q) > 120 else (q or "(queryなし)")
+        return _keep_detail(q, limit=limit) if q else "(queryなし)"
     if command == "NEWS":
         q = str(args.get("query") or "").strip()
-        return (q[:120] + "…") if len(q) > 120 else (q or "(queryなし)")
+        return _keep_detail(q, limit=limit) if q else "(queryなし)"
     if command == "WEATHER":
         w = str(args.get("w_location") or "").strip()
-        return (w[:120] + "…") if len(w) > 120 else (w or "(地名なし)")
+        return _keep_detail(w, limit=limit) if w else "(地名なし)"
     if command == "READ-PAGE":
         u = str(args.get("url") or "").strip()
-        return (u[:120] + "…") if len(u) > 120 else (u or "(urlなし)")
+        return _keep_detail(u, limit=limit) if u else "(urlなし)"
     if command == "LIST-FILES":
         return "(一覧)"
     if command in ("READ-TEXT", "WRITE-TEXT", "APPEND-TEXT", "DELETE-TEXT"):
         fn = str(args.get("filename") or "").strip()
-        return (fn[:120] + "…") if len(fn) > 120 else (fn or "(filenameなし)")
+        return _keep_detail(fn, limit=limit) if fn else "(filenameなし)"
     if command == "GET-SETTING":
         return "(全設定)"
     if command == "SET-SETTING":
         k = str(args.get("key") or "")
-        return (k[:60] + "…") if len(k) > 60 else k or "(key)"
+        return _keep_detail(k, limit=60 if limit > 0 else 0) if k else "(key)"
     if command == "MID-MEMORY-APPEND":
         frag = str(args.get("content") or "").strip()
-        return (frag[:30] + "…") if len(frag) > 30 else (frag or "(contentなし)")
+        return _keep_detail(frag, limit=30 if limit > 0 else 0) if frag else "(contentなし)"
     if command == "MID-MEMORY-CLEAR":
         return "(中期記憶リセット)"
     return "-"
@@ -129,13 +142,14 @@ class LineBrain:
         chunks = self._export_log_lines.pop(key, [])
         return "\n".join(chunks).strip()
 
-    def _resolve_openai_model(self) -> str:
+    def _resolve_openai_model(self, user_id: str | None = None) -> str:
         from .chat_models import resolve_chat_model
 
+        user_settings = get_discord_user_settings(user_id or "")
         return resolve_chat_model(
-            get_db_setting("current_model", ""),
+            user_model_from_choice(user_settings.get("using_model")),
             self._config.openai_model,
-            self._config.allowed_chat_models,
+            self._config.allowed_chat_models | frozenset({"gpt-4o"}),
         )
 
     def _resolve_tool_notice_mode(self, override: str | None = None) -> ToolNoticeMode:
@@ -145,13 +159,13 @@ class LineBrain:
                 raw_override,
                 legacy_show_ri_text="true",
             )
-        return parse_tool_notice_mode(
-            get_db_setting("tool_notice_display", ""),
-            legacy_show_ri_text=get_db_setting("show_ri_text", "true"),
-        )
+        return parse_tool_notice_mode("abbrev", legacy_show_ri_text="true")
 
     def _build_system_prompt_for_user(self, user_id: str) -> str:
         base = self._config.system_prompt
+        user_settings = get_discord_user_settings(user_id or "")
+        if user_settings.get("personal_memory") != "true":
+            return base
         note = get_mid_term_note(user_id or "")
         if not note.strip():
             return base
@@ -179,13 +193,17 @@ class LineBrain:
             hist[0] = {"role": "system", "content": content}
         return hist
 
-    def _trim(self, messages: list[dict]) -> None:
-        max_turns = max(1, self._config.max_history_turns)
+    def _trim(self, messages: list[dict], *, max_turns: int | None = None) -> None:
+        if max_turns is None:
+            max_turns = max(1, self._config.max_history_turns)
+        if max_turns <= 0:
+            del messages[1:]
+            return
         while len(messages) > 1 + 2 * max_turns:
             del messages[1:3]
 
-    def _complete(self, messages: list[dict]) -> tuple[str, dict]:
-        model = self._resolve_openai_model()
+    def _complete(self, messages: list[dict], *, user_id: str | None = None) -> tuple[str, dict]:
+        model = self._resolve_openai_model(user_id)
         response = self._client.chat.completions.create(
             model=model,
             messages=messages,
@@ -245,6 +263,8 @@ class LineBrain:
             return empty_parts
 
         uid = user_id or "anonymous"
+        user_settings = get_discord_user_settings(uid)
+        max_history_turns = talking_memory_turns(user_settings.get("talking_memory"))
 
         notice_mode = self._resolve_tool_notice_mode(tool_notice_display_override)
 
@@ -266,10 +286,18 @@ class LineBrain:
         )
         formatted = payload["text"]
         messages.append({"role": "user", "content": formatted})
-        self._trim(messages)
+        self._trim(messages, max_turns=max_history_turns)
 
-        ai_raw, usage = self._complete(messages)
+        ai_raw, usage = self._complete(messages, user_id=uid)
+        total_tokens_used = int((usage or {}).get("total_tokens") or 0)
         self._append_export_log(uid, "ASSISTANT_RAW", ai_raw)
+        if notice_mode is ToolNoticeMode.RAW:
+            raw_parts: list[str] = []
+            messages.append({"role": "assistant", "content": ai_raw})
+            self._trim(messages, max_turns=max_history_turns)
+            _emit_chunks(on_line_message, ai_raw, out_parts=raw_parts)
+            record_discord_user_usage(uid, tokens=total_tokens_used)
+            return raw_parts
         parsed = parse_ai_response(ai_raw)
         parse_ok = bool(parsed.pop("__dkis_parse_ok__", False))
         if not parse_ok:
@@ -300,7 +328,7 @@ class LineBrain:
         while should_retry and parse_ok and retry_round < self._config.max_retry_chain:
             retry_round += 1
             cmd = (parsed.get("CMD") or "SPEAK").strip().upper()
-            detail = _rt_arg_summary(cmd, parsed.get("ARGS"))
+            detail = _rt_arg_summary(cmd, parsed.get("ARGS"), limit=0 if notice_mode is ToolNoticeMode.FULL else 120)
             parts_body = (TEXT or "").strip()
             notice = ""
             if show_retry_notice(notice_mode):
@@ -333,9 +361,10 @@ class LineBrain:
                 {"role": "assistant", "content": _truncate_tool_payload(ai_raw, self._config.max_retry_payload_chars)}
             )
             messages.append({"role": "user", "content": retry_formatted})
-            self._trim(messages)
+            self._trim(messages, max_turns=max_history_turns)
 
-            ai_raw, usage = self._complete(messages)
+            ai_raw, usage = self._complete(messages, user_id=uid)
+            total_tokens_used += int((usage or {}).get("total_tokens") or 0)
             self._append_export_log(uid, "ASSISTANT_RAW", ai_raw)
             parsed_retry = parse_ai_response(ai_raw)
             parse_ok = bool(parsed_retry.pop("__dkis_parse_ok__", False))
@@ -371,13 +400,13 @@ class LineBrain:
             else ai_raw
         )
         messages.append({"role": "assistant", "content": assistant_hist})
-        self._trim(messages)
+        self._trim(messages, max_turns=max_history_turns)
 
         final_text = (TEXT or "").strip()
         footer_line = ""
         if show_normal_footer(notice_mode):
             cmd_last = (parsed.get("CMD") or "SPEAK").strip().upper()
-            detail_last = _rt_arg_summary(cmd_last, parsed.get("ARGS"))
+            detail_last = _rt_arg_summary(cmd_last, parsed.get("ARGS"), limit=0 if notice_mode is ToolNoticeMode.FULL else 120)
             footer_line = format_normal_footer_line(
                 cmd_last,
                 detail_last,
@@ -397,4 +426,5 @@ class LineBrain:
                     on_line_message(chunk)
             return [fallback]
 
+        record_discord_user_usage(uid, tokens=total_tokens_used)
         return out_parts

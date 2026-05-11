@@ -54,6 +54,9 @@ uv run python dev_console.py
 ## Discord 操作
 
 - 通常メッセージ: ボットが `AIResponder` を通して返信します。
+- `/get_setting`: ユーザー別設定と現在チャンネルの表示設定を確認します。
+- `/set_setting`: `value` を `true/false/1/2/3/4/5` から選び、ユーザー別設定または現在チャンネルの `process_notice` を変更します。
+- `/channel_setting`: 実行したチャンネルで bot を有効/無効にします（既定は無効）。
 - `サーバー再起動` / `再起動` / `restart` / `/restart`: 権限があれば `os.execv` でプロセスを再起動します。
 
 ## Render デプロイ

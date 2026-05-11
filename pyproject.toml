@@ -1,6 +1,6 @@
 [project]
 name = "dkis-disc"
-version = "1.0.2"
+version = "1.1.0"
 description = "DKIS-DISC — Discord上で動作するDKIS互換の軽量AIボット（discord.py + OpenAI + ツール連携）。Web UI・音声・メディア再生なし。"
 readme = "README.md"
 requires-python = ">=3.12"

@@ -25,20 +25,22 @@ from line_bot_app.config import AppConfig
 from line_bot_app.commands_memory import build_settings_text, set_setting_value
 from line_bot_app.line_messages import split_line_text
 from line_bot_app.supabase_store import (
-    CHANNEL_RESPONSE_MODES,
-    CHANNEL_TOOL_NOTICE_VALUES,
+    get_discord_user_settings,
     get_channel_settings,
     remember_discord_user_for_push,
+    response_mode_from_criteria,
     set_channel_setting,
 )
 from line_bot_app.user_messages import MSG_SYSTEM_FAILURE
 
 logger = logging.getLogger("dkis_disc")
-DISCORD_HTTP_USER_AGENT = "DKIS-DISC (https://github.com/SuperGrave/DKIS-DISC, 1.0.2)"
+DISCORD_HTTP_USER_AGENT = "DKIS-DISC (https://github.com/SuperGrave/DKIS-DISC, 1.1.0)"
 DISCORD_ADMINISTRATOR_PERMISSION = 0x8
-USER_SETTING_KEYS = frozenset({"notify_worker_restart"})
-ADMIN_SETTING_KEYS = frozenset({"current_model", "show_ri_text", "tool_notice_display", "text.use_raw_result"})
-CHANNEL_SETTING_KEYS = frozenset({"enabled", "response_mode", "tool_notice_display"})
+USER_SETTING_KEYS = frozenset(
+    {"talk_with_kiritan", "talking_memory", "using_model", "personal_memory", "response_criteria", "process_notice"}
+)
+ADMIN_SETTING_KEYS = frozenset()
+CHANNEL_SETTING_KEYS = frozenset({"enabled"})
 
 
 @dataclass(frozen=True)
@@ -389,19 +391,13 @@ def _format_setting_permission_error(key: str) -> str:
 
 
 def _channel_setting_key_choices() -> list[dict]:
-    return [
-        {"name": "利用ON/OFF（無効にすると復帰操作以外を拒否）", "value": "enabled"},
-        {"name": "応答モード", "value": "response_mode"},
-        {"name": "ツール通知表示", "value": "tool_notice_display"},
-    ]
+    return [{"name": "利用ON/OFF", "value": "enabled"}]
 
 
 def _channel_setting_value_choices() -> list[dict]:
     return [
-        {"name": "有効（ON）", "value": "on"},
-        {"name": "無効（復帰操作以外拒否）", "value": "disabled"},
-        *[{"name": value, "value": value} for value in sorted(CHANNEL_RESPONSE_MODES)],
-        *[{"name": value, "value": value} for value in sorted(CHANNEL_TOOL_NOTICE_VALUES)],
+        {"name": "true（有効）", "value": "true"},
+        {"name": "false（無効）", "value": "false"},
     ]
 
 
@@ -414,23 +410,17 @@ def _format_channel_settings_text(channel_id: str) -> str:
     return (
         f"channel_id: {channel_id or '(unknown)'}\n"
         f"enabled: {settings.get('enabled', 'off')}\n"
-        f"response_mode: {settings.get('response_mode', 'inherit')}\n"
-        f"tool_notice_display: {settings.get('tool_notice_display', 'inherit')}"
+        f"process_notice: {settings.get('process_notice', '2')}"
     )
 
 
 def _format_settings_text(config: AppConfig, user_id: str | None, channel_id: str) -> str:
-    return (
-        build_settings_text(config, user_id)
-        + "\n\n---\n\n【current_channel】\n"
-        + _format_channel_settings_text(channel_id)
-    )
+    return build_settings_text(config, user_id, channel_id)
 
 
 def _is_channel_enable_command(command: str, options: dict[str, str]) -> bool:
     value = (options.get("value") or "").strip().lower()
-    return command == "channel_setting_set" and (options.get("key") or "").strip() == "enabled" and value in {
-        "on",
+    return command == "channel_setting" and value in {
         "true",
         "1",
         "yes",
@@ -440,7 +430,7 @@ def _is_channel_enable_command(command: str, options: dict[str, str]) -> bool:
 def _channel_disabled_response(channel_id: str) -> dict:
     return _interaction_message_response(
         "このチャンネルはDKIS-DISCの利用設定が無効です。\n"
-        f"管理者が `/channel_setting_set key:利用ON/OFF value:有効 channel:{channel_id}` を実行すると有効に戻せます。"
+        f"管理者が `/channel_setting value:true` をこのチャンネルで実行すると有効に戻せます。channel_id={channel_id}"
     )
 
 
@@ -462,38 +452,27 @@ def _build_interaction_command_response(runtime: BotRuntime, payload: dict) -> d
     uid = _interaction_user_id(payload)
 
     try:
-        if command == "setting_get":
+        if command == "get_setting":
             return _interaction_message_response(
                 _format_settings_text(runtime.config, uid, _interaction_channel_id(payload))
             )
 
-        if command == "setting_model":
-            if not _interaction_is_admin(payload):
-                return _interaction_message_response(_format_setting_permission_error("current_model"))
-            ok, line = set_setting_value(runtime.config, "current_model", options.get("model", ""), uid)
-            return _interaction_message_response(line)
-
-        if command == "setting_set":
+        if command == "set_setting":
             key = (options.get("key") or "").strip()
             value = options.get("value") or ""
             if _setting_requires_admin(key) and not _interaction_is_admin(payload):
                 return _interaction_message_response(_format_setting_permission_error(key))
-            ok, line = set_setting_value(runtime.config, key, value, uid)
+            ok, line = set_setting_value(runtime.config, key, value, uid, _interaction_channel_id(payload))
             return _interaction_message_response(line)
 
-        if command == "channel_setting_get":
-            channel_id = _resolve_interaction_channel_option(payload, options)
-            return _interaction_message_response(_format_channel_settings_text(channel_id))
-
-        if command == "channel_setting_set":
+        if command == "channel_setting":
             if not _interaction_is_admin(payload):
                 return _interaction_message_response(
                     "チャンネル設定はDiscord管理者または `DISCORD_ADMIN_USER_IDS` のユーザーだけ変更できます。"
                 )
-            channel_id = _resolve_interaction_channel_option(payload, options)
-            key = (options.get("key") or "").strip()
+            channel_id = _interaction_channel_id(payload)
             value = (options.get("value") or "").strip()
-            ok, line = set_channel_setting(channel_id, key, value)
+            ok, line = set_channel_setting(channel_id, "enabled", value)
             return _interaction_message_response(line)
 
         return _interaction_message_response("未対応のコマンドです。")
@@ -512,7 +491,7 @@ def _handle_discord_interaction(runtime: BotRuntime, payload: dict) -> dict:
 
     data = payload.get("data") or {}
     name = str(data.get("name") or "").lower()
-    if name not in {"setting_get", "setting_set", "setting_model", "channel_setting_get", "channel_setting_set"}:
+    if name not in {"get_setting", "set_setting", "channel_setting"}:
         return _interaction_message_response("未対応のコマンドです。")
     options = _interaction_options(data)
     channel_id = _resolve_interaction_channel_option(payload, options)
@@ -586,26 +565,38 @@ def _start_self_ping() -> None:
 
 
 def _setting_key_choices() -> list[dict]:
-    choices: list[dict] = []
-    for key in sorted(USER_SETTING_KEYS | ADMIN_SETTING_KEYS):
-        choices.append({"name": key, "value": key})
-    return choices
+    return [
+        {"name": "talk with kiritan（きりたんとの会話設定）", "value": "talk_with_kiritan"},
+        {"name": "talking memory（会話履歴の保持）", "value": "talking_memory"},
+        {"name": "using model（使用するモデル）", "value": "using_model"},
+        {"name": "personal memory（個人用中期記憶）", "value": "personal_memory"},
+        {"name": "response criteria（botの応答モード）", "value": "response_criteria"},
+        {"name": "process notice（処理内容の付加表示）", "value": "process_notice"},
+    ]
 
 
-def _model_choices(config: AppConfig) -> list[dict]:
-    return [{"name": model, "value": model} for model in sorted(config.allowed_chat_models)[:25]]
+def _setting_value_choices() -> list[dict]:
+    return [
+        {"name": "true", "value": "true"},
+        {"name": "false", "value": "false"},
+        {"name": "1", "value": "1"},
+        {"name": "2", "value": "2"},
+        {"name": "3", "value": "3"},
+        {"name": "4", "value": "4"},
+        {"name": "5", "value": "5"},
+    ]
 
 
 def _discord_command_definitions(config: AppConfig) -> list[dict]:
     return [
         {
-            "name": "setting_get",
+            "name": "get_setting",
             "description": "DKIS-DISCの現在設定を表示します。",
             "type": 1,
         },
         {
-            "name": "setting_set",
-            "description": "DKIS-DISCの設定を変更します。重要設定は管理者のみです。",
+            "name": "set_setting",
+            "description": "DKIS-DISCの設定を変更します。",
             "type": 1,
             "options": [
                 {
@@ -618,62 +609,23 @@ def _discord_command_definitions(config: AppConfig) -> list[dict]:
                 {
                     "type": 3,
                     "name": "value",
-                    "description": "保存する値",
+                    "description": "保存する値（true/false/1/2/3/4/5）",
                     "required": True,
+                    "choices": _setting_value_choices(),
                 },
             ],
         },
         {
-            "name": "setting_model",
-            "description": "使用するOpenAIチャットモデルを変更します（管理者のみ）。",
+            "name": "channel_setting",
+            "description": "このチャンネルでDKIS-DISCを有効/無効にします（管理者のみ）。",
             "type": 1,
             "options": [
-                {
-                    "type": 3,
-                    "name": "model",
-                    "description": "使用するモデル",
-                    "required": True,
-                    "choices": _model_choices(config),
-                }
-            ],
-        },
-        {
-            "name": "channel_setting_get",
-            "description": "現在または指定チャンネルのDKIS-DISCチャンネル設定を表示します。",
-            "type": 1,
-            "options": [
-                {
-                    "type": 7,
-                    "name": "channel",
-                    "description": "確認するチャンネル（未指定なら現在チャンネル）",
-                    "required": False,
-                }
-            ],
-        },
-        {
-            "name": "channel_setting_set",
-            "description": "チャンネルごとの会話入口・通知表示を変更します（管理者のみ）。",
-            "type": 1,
-            "options": [
-                {
-                    "type": 3,
-                    "name": "key",
-                    "description": "変更するチャンネル設定キー",
-                    "required": True,
-                    "choices": _channel_setting_key_choices(),
-                },
                 {
                     "type": 3,
                     "name": "value",
-                    "description": "保存する値",
+                    "description": "trueで有効、falseで無効",
                     "required": True,
                     "choices": _channel_setting_value_choices(),
-                },
-                {
-                    "type": 7,
-                    "name": "channel",
-                    "description": "変更するチャンネル（未指定なら現在チャンネル）",
-                    "required": False,
                 },
             ],
         },
@@ -784,11 +736,15 @@ def create_bot(runtime: BotRuntime | None = None) -> discord.Client:
         channel_settings = get_channel_settings(message.channel.id)
         if channel_settings.get("enabled", "off") != "on":
             return
+        uid = _discord_user_key(message.author.id)
+        user_settings = get_discord_user_settings(uid)
+        if user_settings.get("talk_with_kiritan", "true") != "true":
+            return
         should_reply, user_text = _message_targets_bot(
             client,
             message,
             message_mode,
-            response_mode_override=channel_settings.get("response_mode", "inherit"),
+            response_mode_override=response_mode_from_criteria(user_settings.get("response_criteria")),
         )
         if not should_reply:
             return
@@ -802,7 +758,6 @@ def create_bot(runtime: BotRuntime | None = None) -> discord.Client:
             restart_process()
             return
 
-        uid = _discord_user_key(message.author.id)
         remember_discord_user_for_push(uid)
         try:
             async with message.channel.typing():
@@ -811,7 +766,7 @@ def create_bot(runtime: BotRuntime | None = None) -> discord.Client:
                     uid=uid,
                     user_text=user_text,
                     channel=message.channel,
-                    tool_notice_display_override=channel_settings.get("tool_notice_display", "inherit"),
+                    tool_notice_display_override=channel_settings.get("tool_notice_display", "abbrev"),
                 )
         except Exception:
             logger.exception("AI reply generation or Discord send failed")

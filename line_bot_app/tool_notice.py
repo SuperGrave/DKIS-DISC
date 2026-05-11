@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-_TOOL_NOTICE_VALUES = frozenset({"full", "abbrev", "minimal", "hidden"})
+_TOOL_NOTICE_VALUES = frozenset({"full", "abbrev", "minimal", "hidden", "raw"})
 
 
 class ToolNoticeMode(str, Enum):
@@ -12,6 +12,7 @@ class ToolNoticeMode(str, Enum):
     ABBREV = "abbrev"
     MINIMAL = "minimal"
     HIDDEN = "hidden"
+    RAW = "raw"
 
 
 def parse_tool_notice_mode(raw: str, *, legacy_show_ri_text: str) -> ToolNoticeMode:
@@ -24,7 +25,7 @@ def parse_tool_notice_mode(raw: str, *, legacy_show_ri_text: str) -> ToolNoticeM
 
 
 def show_retry_notice(mode: ToolNoticeMode) -> bool:
-    return mode is not ToolNoticeMode.HIDDEN
+    return mode not in (ToolNoticeMode.HIDDEN, ToolNoticeMode.RAW)
 
 
 def retry_line_abbreviated(mode: ToolNoticeMode) -> bool:
@@ -87,7 +88,7 @@ def _args_fragment_for_display(detail: str, *, abbreviated: bool) -> str:
         return ""
     if abbreviated:
         return abbrev_detail(raw, max_keep=5)
-    return (raw[:120] + "…") if len(raw) > 120 else raw
+    return raw
 
 
 def usage_suffix_tokens(usage: dict | None) -> str:
@@ -136,4 +137,4 @@ def format_normal_footer_line(cmd: str, detail: str, usage: dict | None, *, abbr
     return format_notice_line("[N1]", cmd, detail, usage, abbreviated=abbreviated)
 
 
-ALLOWED_TOOL_NOTICE_DISPLAY_HINT = "full | abbrev | minimal | hidden"
+ALLOWED_TOOL_NOTICE_DISPLAY_HINT = "full | abbrev | minimal | hidden | raw"

@@ -3,22 +3,20 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from openai import OpenAI
 
-from .chat_models import format_allowed_models_hint, resolve_chat_model
+from .chat_models import resolve_chat_model
 from .config import AppConfig
-from .tool_notice import (
-    ALLOWED_TOOL_NOTICE_DISPLAY_HINT,
-    parse_tool_notice_mode,
-)
-from .commands import CommandServices
 from .supabase_store import (
     append_mid_term_note,
     clear_mid_term_note,
     dumps_memory_index,
+    get_channel_settings,
     get_db_setting,
+    get_discord_user_settings,
+    get_discord_user_stats,
     get_notify_worker_restart,
     memory_append,
     memory_delete,
@@ -26,45 +24,39 @@ from .supabase_store import (
     memory_read_row,
     memory_write,
     normalize_memory_user_id,
-    set_db_setting,
+    process_notice_mode_from_choice,
+    response_mode_from_criteria,
+    set_channel_setting,
+    set_discord_user_setting,
     set_notify_worker_restart,
+    talking_memory_turns,
+    user_model_from_choice,
     validate_memory_filename,
 )
 
+if TYPE_CHECKING:
+    from .commands import CommandServices
+
 _ALLOWED_SETTING_KEYS = frozenset(
     {
-        "current_model",
-        "show_ri_text",
-        "tool_notice_display",
-        "text.use_raw_result",
+        "talk_with_kiritan",
+        "talking_memory",
+        "using_model",
+        "personal_memory",
+        "response_criteria",
+        "process_notice",
         "notify_worker_restart",
     }
 )
-_PER_USER_SETTING_KEYS = frozenset({"notify_worker_restart"})
-_ALL_SETTING_KEYS_ORDER: tuple[str, ...] = (
-    "current_model",
-    "tool_notice_display",
-    "show_ri_text",
-    "text.use_raw_result",
-    "notify_worker_restart",
-)
-_TOOL_NOTICE_DB_VALUES = frozenset({"full", "abbrev", "minimal", "hidden"})
-
-_TOOL_NOTICE_MODE_HELP: dict[str, str] = {
-    "full": "リトライ・末尾とも長めの ARGS 要約＋日本語ラベル（例: [R1]検索 … t:…）",
-    "abbrev": "リトライ・末尾とも短い ARGS 要約＋日本語ラベル",
-    "minimal": "リトライ行のみ（末尾なし）。本文と同じ吹き出しに付与",
-    "hidden": "システム行なし（レガシー show_ri_text=false と同等）",
-}
-
 _READ_SUMMARY_INPUT_CAP = 14_000
 
 
-def _effective_openai_model(svc: CommandServices) -> str:
+def _effective_openai_model(svc: CommandServices, user_id: str | None = None) -> str:
+    user_settings = get_discord_user_settings(user_id or "")
     return resolve_chat_model(
-        get_db_setting("current_model", ""),
+        user_model_from_choice(user_settings.get("using_model")),
         svc.config.openai_model,
-        svc.config.allowed_chat_models,
+        svc.config.allowed_chat_models | frozenset({"gpt-4o"}),
     )
 
 
@@ -126,7 +118,7 @@ def cmd_read_text(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None 
         dmis_log = f"READ-TEXT raw {fn_raw}"
         return TEXT or "", dmis_log, blob, blob, None
 
-    summary, s_err = _summarize_long_text(svc.client, _effective_openai_model(svc), content)
+    summary, s_err = _summarize_long_text(svc.client, _effective_openai_model(svc, user_id), content)
     if s_err:
         fallback = f"{meta}\n--- content（要約失敗） ---\n{content[:8000]}"
         return TEXT or "", f"READ-TEXT 要約エラー {fn_raw}", fallback, fallback, None
@@ -203,61 +195,8 @@ def cmd_mid_memory_clear(svc: CommandServices, args: dict, TEXT: str, NOTE: str 
     return TEXT or "", "MID-MEMORY-CLEAR", line, line, None
 
 
-def _format_setting_block(config: AppConfig, key: str, user_id: str | None) -> str:
-    """単一キーの説明テキスト（GET-SETTING の本文）。"""
-    defaults = {
-        "current_model": config.openai_model,
-        "show_ri_text": "true",
-        "tool_notice_display": "",
-        "text.use_raw_result": "false",
-    }
-    if key == "notify_worker_restart":
-        uid = normalize_memory_user_id(user_id or "")
-        if uid == "anonymous":
-            return (
-                "参照できません: Discord userId がありません。\n"
-                "このキーは known_line_users（この Discord アカウント単位）に保存されます。"
-            )
-        on = get_notify_worker_restart(uid)
-        if config.restart_push_enabled:
-            srv = "オン … settings.json の notifications.restart_push_enabled が true で、再起動時の定型 Push を送れます。"
-        else:
-            srv = (
-                "オフ … notifications.restart_push_enabled=false のため、"
-                "再起動時の定型 Push は全宛先について送られません。"
-            )
-        return (
-            f"{key} = {'true' if on else 'false'}（この Discord のオプトイン）\n"
-            f"サーバー: {srv}\n"
-            "ユーザーがオンでもサーバーがオフなら送信されません。\n"
-            "ユーザーがオフなら、このアカウントへの DB 登録による宛先には送られません。\n"
-            "※このキーだけ Discord アカウントごとです（user_settings ではありません）。"
-        )
-
-    val = get_db_setting(key, defaults.get(key, ""))
-    if key == "current_model":
-        eff = resolve_chat_model(val, config.openai_model, config.allowed_chat_models)
-        hint = format_allowed_models_hint(config.allowed_chat_models)
-        line = (
-            f"{key} DB値={val!r}\n"
-            f"実効モデル={eff!r}\n"
-            f"許可リスト（SET-SETTING で指定できる値）: {hint}"
-        )
-    elif key == "tool_notice_display":
-        legacy = get_db_setting("show_ri_text", "true")
-        eff = parse_tool_notice_mode(val, legacy_show_ri_text=legacy)
-        hint_eff = _TOOL_NOTICE_MODE_HELP.get(eff.value, "")
-        line = (
-            f"{key} DB値={val!r}\n"
-            f"実効モード={eff.value}（{hint_eff}）\n"
-            f"legacy show_ri_text={legacy!r}（tool_notice_display が空のときのみ効く）\n"
-            f"SET で使える値: {ALLOWED_TOOL_NOTICE_DISPLAY_HINT}"
-        )
-    else:
-        line = f"{key} = {val!r}"
-    if key not in _PER_USER_SETTING_KEYS:
-        line += "\n※この値はボット全体（すべての Discord ユーザー）で共通です。"
-    return line
+def _setting_line(name: str, label: str, value: str, value_label: str, desc: str, choices: str) -> str:
+    return f"{name:<20}<{label}>\n ={value} ({value_label})\n  →{desc}\n　　[{choices}]"
 
 
 def cmd_get_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None, *, user_id=None):
@@ -266,18 +205,109 @@ def cmd_get_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | Non
     return TEXT or "", "GET-SETTING (all)", line, None, None
 
 
-def build_settings_text(config: AppConfig, user_id: str | None) -> str:
-    blocks = [_format_setting_block(config, k, user_id) for k in _ALL_SETTING_KEYS_ORDER]
-    headings = [f"【{k}】" for k in _ALL_SETTING_KEYS_ORDER]
-    inner = "\n\n---\n\n".join(f"{h}\n{b}" for h, b in zip(headings, blocks, strict=True))
-    return "（設定 全項目）\n\n" + inner
+def build_settings_text(config: AppConfig, user_id: str | None, channel_id: str | None = None) -> str:
+    uid = normalize_memory_user_id(user_id or "")
+    user_settings = get_discord_user_settings(uid)
+    channel_settings = get_channel_settings(channel_id or "")
+    stats = get_discord_user_stats(uid)
+    talk = user_settings["talk_with_kiritan"]
+    memory = user_settings["talking_memory"]
+    model = user_settings["using_model"]
+    personal = user_settings["personal_memory"]
+    response = user_settings["response_criteria"]
+    notice = channel_settings.get("process_notice", "2")
+    memory_labels = {"1": "15ターン保持", "2": "10ターン保持", "3": "5ターン保持", "4": "保持しない(非推奨)"}
+    model_labels = {"1": "gpt-4.1-mini", "2": "gpt-5.4-mini", "3": "gpt-4o", "4": "gpt-5.2", "5": "gpt-5.4"}
+    response_labels = {"1": "通常メッセージ", "2": "メンション付きメッセージ"}
+    notice_labels = {"1": "非表示", "2": "最小", "3": "表示", "4": "開発者用"}
+    blocks = [
+        "[ユーザー別設定]",
+        "",
+        _setting_line(
+            "talk with kiritan",
+            "きりたんとの会話設定",
+            talk,
+            "会話する" if talk == "true" else "会話しない",
+            "きりたんと会話するか否かを設定します。falseに設定してあるユーザーのメッセージは無視します。",
+            "true : 会話する  false : 会話しない",
+        ),
+        "",
+        _setting_line(
+            "talking memory",
+            "会話履歴の保持",
+            memory,
+            memory_labels.get(memory, "15ターン保持"),
+            "ユーザーとの会話内容を履歴として参照します。保持ターンを増やすことでより過去の会話まで覚えられますが、消費トークン数が増大し、モデルによっては応答精度が低下します。",
+            "1 : 15ターン保持  2 : 10ターン保持  3 : 5ターン保持  4 : 保持しない(非推奨)",
+        ),
+        "",
+        _setting_line(
+            "using model",
+            "使用するモデル",
+            model,
+            model_labels.get(model, "gpt-5.4-mini"),
+            "きりたんの応答に使用するモデルを変更します。",
+            "1 : gpt-4.1-mini  2 : gpt-5.4-mini  3 : gpt-4o   4 : gpt-5.2  5 : gpt-5.4",
+        ),
+        "",
+        _setting_line(
+            "personal memory",
+            "個人用中期記憶",
+            personal,
+            "利用する" if personal == "true" else "利用しない",
+            "会話履歴のリセットで消去されない、ユーザーごとの記憶を覚えておけるスペースをきりたんに与えます。",
+            "true : 利用する false : 利用しない",
+        ),
+        "",
+        _setting_line(
+            "response criteria",
+            "botの応答モード",
+            response,
+            response_labels.get(response, "通常メッセージ"),
+            "きりたんにメッセージを送る方法を変更します。",
+            "1 : 通常メッセージ  2 : メンション付きメッセージ",
+        ),
+        "",
+        "",
+        "[チャンネル別設定]",
+        "",
+        _setting_line(
+            "process notice",
+            "処理内容の付加表示",
+            notice,
+            notice_labels.get(notice, "最小"),
+            "きりたんの内部処理結果(使用したコマンド・消費トークン数)を応答文の最後に付加します。",
+            "1 : 非表示  2 : 最小  3 : 表示  4 : 開発者用",
+        ),
+        "",
+        "",
+        f"ユーザーID          :{'' if uid == 'anonymous' else uid}",
+        "",
+        f"チャンネルID        :{channel_id or ''}",
+        "",
+        f"きりたんとの会話回数:{stats['conversation_count']}回",
+        "",
+        f"個人用中期記憶文字数:{stats['mid_term_note_chars']}文字(max{200}文字)",
+        "",
+        f"本日の消費トークン数:{stats['daily_token_count']}トークン",
+    ]
+    return "\n".join(blocks)
 
 
-def set_setting_value(config: AppConfig, key: str, val: str, user_id: str | None) -> tuple[bool, str]:
+def set_setting_value(config: AppConfig, key: str, val: str, user_id: str | None, channel_id: str | None = None) -> tuple[bool, str]:
     key = str(key or "").strip()
-    val = str(val if val is not None else "")
+    val = str(val if val is not None else "").strip().lower()
+    key_aliases = {
+        "talk with kiritan": "talk_with_kiritan",
+        "talking memory": "talking_memory",
+        "using model": "using_model",
+        "personal memory": "personal_memory",
+        "response criteria": "response_criteria",
+        "process notice": "process_notice",
+    }
+    key = key_aliases.get(key, key)
     if key not in _ALLOWED_SETTING_KEYS:
-        return False, f"key は {sorted(_ALLOWED_SETTING_KEYS)} のいずれかです。"
+        return False, "key は talk_with_kiritan / talking_memory / using_model / personal_memory / response_criteria / process_notice です。"
     if key == "notify_worker_restart":
         uid = normalize_memory_user_id(user_id or "")
         if uid == "anonymous":
@@ -300,31 +330,25 @@ def set_setting_value(config: AppConfig, key: str, val: str, user_id: str | None
             )
         return True, line
 
-    if key == "current_model":
-        vm = val.strip()
-        if vm and vm not in config.allowed_chat_models:
-            hint = format_allowed_models_hint(config.allowed_chat_models)
-            return False, f"このモデルは許可リストにありません: {vm!r}。許可: {hint}"
-    if key == "tool_notice_display":
-        vm = val.strip().lower()
-        if vm and vm not in _TOOL_NOTICE_DB_VALUES:
-            return False, (
-                f"tool_notice_display は {sorted(_TOOL_NOTICE_DB_VALUES)} のいずれか、"
-                f"または空（レガシーの show_ri_text に従う）です。"
-            )
-    ok, err = set_db_setting(key, val)
+    if key == "process_notice":
+        ok, err = set_channel_setting(channel_id or "", "process_notice", val)
+        if not ok:
+            return False, err or "不明なエラー"
+        line = f"process_notice を {val}（{process_notice_mode_from_choice(val)}）にしました。"
+        return True, line
+
+    ok, err = set_discord_user_setting(user_id or "", key, val)
     if not ok:
         return False, err or "不明なエラー"
-    line = f"{key} を保存しました。"
-    if key == "current_model":
-        line += f" 実効モデルは {resolve_chat_model(val, config.openai_model, config.allowed_chat_models)!r} です。"
-    elif key == "tool_notice_display":
-        eff = parse_tool_notice_mode(val, legacy_show_ri_text=get_db_setting("show_ri_text", "true"))
-        line += f" 実効モードは {eff.value} です。"
+    line = f"{key} を {val} にしました。"
+    if key == "talking_memory":
+        line += f" 会話履歴は {talking_memory_turns(val)} ターン保持です。"
+    elif key == "using_model":
+        line += f" 実効モデルは {user_model_from_choice(val)!r} です。"
+    elif key == "response_criteria":
+        line += f" 応答モードは {response_mode_from_criteria(val)} です。"
     else:
-        line += "（値の妥当性はモデル側・運用で確認してください）。"
-    if key not in _PER_USER_SETTING_KEYS:
-        line += "\n※変更はボット全体（すべての Discord ユーザー）に反映されます。"
+        line += " このDiscordアカウントだけに適用されます。"
     return True, line
 
 

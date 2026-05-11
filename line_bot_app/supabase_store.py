@@ -29,13 +29,31 @@ _filename_safe_re = re.compile(r"^[\w\-\.\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf
 MAX_FILENAME_LEN = 200
 MAX_MEMORY_CONTENT_CHARS = 500_000
 MID_TERM_NOTE_MAX_CHARS = 200
+USER_MODEL_CHOICES = {
+    "1": "gpt-4.1-mini",
+    "2": "gpt-5.4-mini",
+    "3": "gpt-4o",
+    "4": "gpt-5.2",
+    "5": "gpt-5.4",
+}
+TALKING_MEMORY_TURNS = {"1": 15, "2": 10, "3": 5, "4": 0}
+USER_RESPONSE_MODES = {"1": "normal", "2": "mention"}
+PROCESS_NOTICE_MODES = {"1": "hidden", "2": "abbrev", "3": "full", "4": "raw"}
+DEFAULT_USER_SETTINGS = {
+    "talk_with_kiritan": "true",
+    "talking_memory": "1",
+    "using_model": "2",
+    "personal_memory": "false",
+    "response_criteria": "1",
+}
 CHANNEL_ENABLED_VALUES = frozenset({"on", "off", "enabled", "disabled", "true", "false", "1", "0", "yes", "no"})
 CHANNEL_RESPONSE_MODES = frozenset({"inherit", "normal", "mention", "off"})
-CHANNEL_TOOL_NOTICE_VALUES = frozenset({"inherit", "full", "abbrev", "minimal", "hidden"})
+CHANNEL_TOOL_NOTICE_VALUES = frozenset({"inherit", "full", "abbrev", "minimal", "hidden", "raw"})
 DEFAULT_CHANNEL_SETTINGS = {
     "enabled": "off",
     "response_mode": "inherit",
-    "tool_notice_display": "inherit",
+    "tool_notice_display": "abbrev",
+    "process_notice": "2",
 }
 
 _client_cache: Any = None
@@ -116,6 +134,178 @@ def normalize_channel_id(channel_id: str | int | None) -> str:
     return str(channel_id or "").strip()
 
 
+def _bool_text(value: object, *, default: bool) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    raw = str(value if value is not None else "").strip().lower()
+    if raw in {"true", "1", "yes", "on"}:
+        return "true"
+    if raw in {"false", "0", "no", "off"}:
+        return "false"
+    return "true" if default else "false"
+
+
+def _as_choice(value: object, allowed: set[str] | frozenset[str] | dict[str, object], default: str) -> str:
+    raw = str(value if value is not None else "").strip()
+    return raw if raw in allowed else default
+
+
+def user_model_from_choice(choice: str | int | None) -> str:
+    return USER_MODEL_CHOICES.get(str(choice or "").strip(), USER_MODEL_CHOICES[DEFAULT_USER_SETTINGS["using_model"]])
+
+
+def talking_memory_turns(choice: str | int | None) -> int:
+    return TALKING_MEMORY_TURNS.get(str(choice or "").strip(), TALKING_MEMORY_TURNS[DEFAULT_USER_SETTINGS["talking_memory"]])
+
+
+def response_mode_from_criteria(choice: str | int | None) -> str:
+    return USER_RESPONSE_MODES.get(str(choice or "").strip(), USER_RESPONSE_MODES[DEFAULT_USER_SETTINGS["response_criteria"]])
+
+
+def process_notice_mode_from_choice(choice: str | int | None) -> str:
+    return PROCESS_NOTICE_MODES.get(str(choice or "").strip(), PROCESS_NOTICE_MODES[DEFAULT_CHANNEL_SETTINGS["process_notice"]])
+
+
+def _normalize_user_settings(row: dict[str, Any] | None = None) -> dict[str, str]:
+    row = row or {}
+    out = dict(DEFAULT_USER_SETTINGS)
+    out["talk_with_kiritan"] = _bool_text(row.get("talk_with_kiritan"), default=True)
+    out["talking_memory"] = _as_choice(row.get("talking_memory"), TALKING_MEMORY_TURNS, out["talking_memory"])
+    out["using_model"] = _as_choice(row.get("using_model"), USER_MODEL_CHOICES, out["using_model"])
+    out["personal_memory"] = _bool_text(row.get("personal_memory"), default=False)
+    out["response_criteria"] = _as_choice(row.get("response_criteria"), USER_RESPONSE_MODES, out["response_criteria"])
+    return out
+
+
+def get_discord_user_settings(uid: str | None) -> dict[str, str]:
+    u = normalize_memory_user_id(uid)
+    if u == "anonymous":
+        return dict(DEFAULT_USER_SETTINGS)
+    sb = _client()
+    if sb is None:
+        return dict(DEFAULT_USER_SETTINGS)
+    try:
+        r = (
+            sb.table("known_line_users")
+            .select("talk_with_kiritan,talking_memory,using_model,personal_memory,response_criteria")
+            .eq("line_user_id", u)
+            .limit(1)
+            .execute()
+        )
+        rows = r.data or []
+        return _normalize_user_settings(rows[0] if rows else None)
+    except Exception:
+        return dict(DEFAULT_USER_SETTINGS)
+
+
+def set_discord_user_setting(uid: str | None, key: str, value: str) -> tuple[bool, str]:
+    u = normalize_memory_user_id(uid)
+    if u == "anonymous":
+        return False, "Discord userId が無いため設定できません。"
+    k = str(key or "").strip()
+    v = str(value if value is not None else "").strip().lower()
+    current = get_discord_user_settings(u)
+    if k in {"talk_with_kiritan", "personal_memory"}:
+        if v not in {"true", "false"}:
+            return False, f"{k} の value は true/false です。"
+    elif k == "talking_memory":
+        if v not in TALKING_MEMORY_TURNS:
+            return False, "talking_memory の value は 1/2/3/4 です。"
+    elif k == "using_model":
+        if v not in USER_MODEL_CHOICES:
+            return False, "using_model の value は 1/2/3/4/5 です。"
+    elif k == "response_criteria":
+        if v not in USER_RESPONSE_MODES:
+            return False, "response_criteria の value は 1/2 です。"
+    else:
+        return False, "key は talk_with_kiritan, talking_memory, using_model, personal_memory, response_criteria, process_notice のいずれかです。"
+    current[k] = v
+    sb = _client()
+    if sb is None:
+        return False, "Supabase が未設定です（SUPABASE_URL / SUPABASE_KEY）。"
+    try:
+        sb.table("known_line_users").upsert(
+            {
+                "line_user_id": u,
+                "last_seen_at": _now_iso(),
+                **current,
+            },
+            on_conflict="line_user_id",
+        ).execute()
+        return True, ""
+    except Exception as exc:
+        return False, str(exc)
+
+
+def get_discord_user_stats(uid: str | None) -> dict[str, int | str]:
+    u = normalize_memory_user_id(uid)
+    out: dict[str, int | str] = {
+        "user_id": "" if u == "anonymous" else u,
+        "conversation_count": 0,
+        "mid_term_note_chars": 0,
+        "daily_token_count": 0,
+    }
+    if u == "anonymous":
+        return out
+    sb = _client()
+    if sb is None:
+        return out
+    try:
+        r = (
+            sb.table("known_line_users")
+            .select("conversation_count,mid_term_note,daily_token_date,daily_token_count")
+            .eq("line_user_id", u)
+            .limit(1)
+            .execute()
+        )
+        rows = r.data or []
+        if not rows:
+            return out
+        row = rows[0]
+        out["conversation_count"] = int(row.get("conversation_count") or 0)
+        out["mid_term_note_chars"] = len(str(row.get("mid_term_note") or ""))
+        today = datetime.now(timezone.utc).date().isoformat()
+        out["daily_token_count"] = int(row.get("daily_token_count") or 0) if row.get("daily_token_date") == today else 0
+        return out
+    except Exception:
+        return out
+
+
+def record_discord_user_usage(uid: str | None, *, tokens: int = 0) -> None:
+    u = normalize_memory_user_id(uid)
+    if u == "anonymous":
+        return
+    sb = _client()
+    if sb is None:
+        return
+    today = datetime.now(timezone.utc).date().isoformat()
+    try:
+        r = (
+            sb.table("known_line_users")
+            .select("conversation_count,daily_token_date,daily_token_count")
+            .eq("line_user_id", u)
+            .limit(1)
+            .execute()
+        )
+        row = (r.data or [{}])[0]
+        conversation_count = int(row.get("conversation_count") or 0) + 1
+        old_date = str(row.get("daily_token_date") or "")
+        daily_count = int(row.get("daily_token_count") or 0) if old_date == today else 0
+        daily_count += max(0, int(tokens or 0))
+        sb.table("known_line_users").upsert(
+            {
+                "line_user_id": u,
+                "last_seen_at": _now_iso(),
+                "conversation_count": conversation_count,
+                "daily_token_date": today,
+                "daily_token_count": daily_count,
+            },
+            on_conflict="line_user_id",
+        ).execute()
+    except Exception:
+        pass
+
+
 def _channel_settings_cache_seconds() -> int:
     raw = (os.environ.get("CHANNEL_SETTINGS_CACHE_SECONDS") or "300").strip()
     try:
@@ -151,7 +341,7 @@ def get_channel_settings(channel_id: str | int | None, *, use_cache: bool = True
     try:
         r = (
             sb.table("channel_settings")
-            .select("enabled,response_mode,tool_notice_display")
+            .select("*")
             .eq("channel_id", cid)
             .limit(1)
             .execute()
@@ -164,6 +354,7 @@ def get_channel_settings(channel_id: str | int | None, *, use_cache: bool = True
         enabled = row.get("enabled")
         response_mode = str(row.get("response_mode") or "inherit").strip().lower()
         tool_notice_display = str(row.get("tool_notice_display") or "inherit").strip().lower()
+        process_notice = str(row.get("process_notice") or "").strip()
         if isinstance(enabled, bool):
             out["enabled"] = "on" if enabled else "off"
         else:
@@ -176,6 +367,17 @@ def get_channel_settings(channel_id: str | int | None, *, use_cache: bool = True
             out["response_mode"] = response_mode
         if tool_notice_display in CHANNEL_TOOL_NOTICE_VALUES:
             out["tool_notice_display"] = tool_notice_display
+        if process_notice in PROCESS_NOTICE_MODES:
+            out["process_notice"] = process_notice
+            out["tool_notice_display"] = process_notice_mode_from_choice(process_notice)
+        elif tool_notice_display in {"hidden", "abbrev", "minimal", "full", "raw"}:
+            out["process_notice"] = {
+                "hidden": "1",
+                "abbrev": "2",
+                "minimal": "2",
+                "full": "3",
+                "raw": "4",
+            }[tool_notice_display]
         _remember_channel_settings_cache(cid, out)
         return out
     except Exception:
@@ -193,6 +395,9 @@ def set_channel_setting(channel_id: str | int | None, key: str, value: str) -> t
         if v not in CHANNEL_ENABLED_VALUES:
             return False, "enabled は on/off、enabled/disabled（または true/false、1/0、yes/no）です。"
         v = "off" if v in {"off", "disabled", "false", "0", "no"} else "on"
+    elif k == "process_notice":
+        if v not in PROCESS_NOTICE_MODES:
+            return False, "process_notice の value は 1/2/3/4 です。"
     elif k == "response_mode":
         if v not in CHANNEL_RESPONSE_MODES:
             return False, f"response_mode は {sorted(CHANNEL_RESPONSE_MODES)} のいずれかです。"
@@ -200,12 +405,14 @@ def set_channel_setting(channel_id: str | int | None, key: str, value: str) -> t
         if v not in CHANNEL_TOOL_NOTICE_VALUES:
             return False, f"tool_notice_display は {sorted(CHANNEL_TOOL_NOTICE_VALUES)} のいずれかです。"
     else:
-        return False, "key は enabled、response_mode、tool_notice_display のいずれかです。"
+        return False, "key は enabled または process_notice です。"
     sb = _client()
     if sb is None:
         return False, "Supabase が未設定です（SUPABASE_URL / SUPABASE_KEY）。"
     current = get_channel_settings(cid, use_cache=False)
     current[k] = v
+    if k == "process_notice":
+        current["tool_notice_display"] = process_notice_mode_from_choice(v)
     try:
         sb.table("channel_settings").upsert(
             {
@@ -213,6 +420,7 @@ def set_channel_setting(channel_id: str | int | None, key: str, value: str) -> t
                 "enabled": current["enabled"] == "on",
                 "response_mode": current["response_mode"],
                 "tool_notice_display": current["tool_notice_display"],
+                "process_notice": current["process_notice"],
                 "updated_at": _now_iso(),
             },
             on_conflict="channel_id",
@@ -220,8 +428,7 @@ def set_channel_setting(channel_id: str | int | None, key: str, value: str) -> t
         _remember_channel_settings_cache(cid, current)
         return True, (
             f"channel {cid} の {k} を {v} にしました。\n"
-            f"enabled={current['enabled']} / response_mode={current['response_mode']} / "
-            f"tool_notice_display={current['tool_notice_display']}"
+            f"enabled={current['enabled']} / process_notice={current['process_notice']}"
         )
     except Exception as exc:
         return False, str(exc)

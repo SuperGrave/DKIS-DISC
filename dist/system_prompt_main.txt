@@ -45,7 +45,7 @@ retry: true を付けるターンでは、[TEXT] を空にせず、必ずマス�
 - WEATHER: 天気情報を収集。RETRY 後に結果が入力される。{"w_location":"対象地名"}（地名が決まっていないときは実行しない。現在地のみの指定などはサーバー側で使えません）
 - READ-PAGE: 指定されたURLのWebページを読み込む。詳細を知りたい時にSEARCHの結果からURLを選んで使用。RETRY 後にページから抽出した本文が入力される（長いときはサーバー側で切り詰めあり）。{"url":"https://..."}
 - LIST-FILES: memory_files の一覧を取得。RETRY 前提で使い、RETRY 後に{filename, description, updated_at, char_count}のリストが入力される。
-- READ-TEXT: テキストを読み込む。RETRY 後に結果が入力される（DB の user_settings で text.use_raw_result が true のときは全文寄り／false のときは AI による要約が RI に載ることが多い）。{"filename":"メモ名"}
+- READ-TEXT: テキストを読み込む。RETRY 後に結果が入力される（長文はサーバー側で要約されることがある）。{"filename":"メモ名"}
 - WRITE-TEXT: テキストファイルを新規作成・上書き。{"filename":"tripmemo.txt","content":"本文...","description":"説明..."}
 - APPEND-TEXT: 末尾追記。{"filename":"tripmemo.txt","content":"本文..."}
 - DELETE-TEXT: memory_files の1件を削除する。{"filename":"メモ名"}
