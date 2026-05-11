@@ -25,6 +25,7 @@ from line_bot_app.config import AppConfig
 from line_bot_app.commands_memory import build_settings_text, set_setting_value
 from line_bot_app.line_messages import split_line_text
 from line_bot_app.supabase_store import (
+    CHANNEL_ENABLED_VALUES,
     CHANNEL_RESPONSE_MODES,
     CHANNEL_TOOL_NOTICE_VALUES,
     get_channel_settings,
@@ -38,7 +39,7 @@ DISCORD_HTTP_USER_AGENT = "DKIS-DISC (https://github.com/SuperGrave/DKIS-DISC, 1
 DISCORD_ADMINISTRATOR_PERMISSION = 0x8
 USER_SETTING_KEYS = frozenset({"notify_worker_restart"})
 ADMIN_SETTING_KEYS = frozenset({"current_model", "show_ri_text", "tool_notice_display", "text.use_raw_result"})
-CHANNEL_SETTING_KEYS = frozenset({"response_mode", "tool_notice_display"})
+CHANNEL_SETTING_KEYS = frozenset({"enabled", "response_mode", "tool_notice_display"})
 
 
 @dataclass(frozen=True)
@@ -216,7 +217,12 @@ def _ram_usage_label() -> str:
     return f"RAM {pct}%"
 
 
-def _connected_channel_count(client: discord.Client) -> int:
+def _channel_is_enabled(channel_id: str | int | None) -> bool:
+    return get_channel_settings(channel_id).get("enabled", "on") == "on"
+
+
+def _connected_channel_counts(client: discord.Client) -> tuple[int, int]:
+    enabled = 0
     total = 0
     for guild in client.guilds:
         me = guild.me
@@ -226,11 +232,9 @@ def _connected_channel_count(client: discord.Client) -> int:
             permissions = channel.permissions_for(me)
             if permissions.view_channel and permissions.send_messages and permissions.read_message_history:
                 total += 1
-    return total
-
-
-def _connected_guild_count(client: discord.Client) -> int:
-    return len(client.guilds)
+                if _channel_is_enabled(channel.id):
+                    enabled += 1
+    return enabled, total
 
 
 def _status_mode(channel_count: int) -> str:
@@ -245,9 +249,8 @@ def _status_mode(channel_count: int) -> str:
 
 
 async def _update_presence_once(client: discord.Client) -> None:
-    guild_count = _connected_guild_count(client)
-    channel_count = _connected_channel_count(client)
-    mode = _status_mode(channel_count)
+    enabled_channel_count, channel_count = _connected_channel_counts(client)
+    mode = _status_mode(enabled_channel_count)
     if mode == "sleep":
         await client.change_presence(
             status=discord.Status.idle,
@@ -255,7 +258,7 @@ async def _update_presence_once(client: discord.Client) -> None:
         )
         return
 
-    label = f"run in {guild_count}sv・{channel_count}ch - {_ram_usage_label()}"
+    label = f"run in {enabled_channel_count}/{channel_count}ch・{_ram_usage_label()}"
     await client.change_presence(
         status=discord.Status.online,
         activity=discord.Activity(type=discord.ActivityType.watching, name=label),
@@ -375,8 +378,34 @@ def _format_channel_settings_text(channel_id: str) -> str:
     settings = get_channel_settings(channel_id)
     return (
         f"channel_id: {channel_id or '(unknown)'}\n"
+        f"enabled: {settings.get('enabled', 'on')}\n"
         f"response_mode: {settings.get('response_mode', 'inherit')}\n"
         f"tool_notice_display: {settings.get('tool_notice_display', 'inherit')}"
+    )
+
+
+def _format_settings_text(config: AppConfig, user_id: str | None, channel_id: str) -> str:
+    return (
+        build_settings_text(config, user_id)
+        + "\n\n---\n\n【current_channel】\n"
+        + _format_channel_settings_text(channel_id)
+    )
+
+
+def _is_channel_enable_command(command: str, options: dict[str, str]) -> bool:
+    value = (options.get("value") or "").strip().lower()
+    return command == "channel_setting_set" and (options.get("key") or "").strip() == "enabled" and value in {
+        "on",
+        "true",
+        "1",
+        "yes",
+    }
+
+
+def _channel_disabled_response(channel_id: str) -> dict:
+    return _interaction_message_response(
+        "このチャンネルはDKIS-DISCの利用設定がOFFです。\n"
+        f"管理者が `/channel_setting_set key:enabled value:on channel:{channel_id}` を実行するとONに戻せます。"
     )
 
 
@@ -399,7 +428,9 @@ def _build_interaction_command_response(runtime: BotRuntime, payload: dict) -> d
 
     try:
         if command == "setting_get":
-            return _interaction_message_response(build_settings_text(runtime.config, uid))
+            return _interaction_message_response(
+                _format_settings_text(runtime.config, uid, _interaction_channel_id(payload))
+            )
 
         if command == "setting_model":
             if not _interaction_is_admin(payload):
@@ -448,6 +479,10 @@ def _handle_discord_interaction(runtime: BotRuntime, payload: dict) -> dict:
     name = str(data.get("name") or "").lower()
     if name not in {"setting_get", "setting_set", "setting_model", "channel_setting_get", "channel_setting_set"}:
         return _interaction_message_response("未対応のコマンドです。")
+    options = _interaction_options(data)
+    channel_id = _resolve_interaction_channel_option(payload, options)
+    if not _channel_is_enabled(channel_id) and not _is_channel_enable_command(name, options):
+        return _channel_disabled_response(channel_id)
 
     return _build_interaction_command_response(runtime, payload)
 
@@ -593,7 +628,7 @@ def _discord_command_definitions(config: AppConfig) -> list[dict]:
                     "name": "value",
                     "description": "保存する値",
                     "required": True,
-                    "choices": _choice_list(CHANNEL_RESPONSE_MODES | CHANNEL_TOOL_NOTICE_VALUES),
+                    "choices": _choice_list(CHANNEL_ENABLED_VALUES | CHANNEL_RESPONSE_MODES | CHANNEL_TOOL_NOTICE_VALUES),
                 },
                 {
                     "type": 7,
@@ -690,6 +725,8 @@ def create_bot(runtime: BotRuntime | None = None) -> discord.Client:
         if message.author.bot:
             return
         channel_settings = get_channel_settings(message.channel.id)
+        if channel_settings.get("enabled", "on") != "on":
+            return
         should_reply, user_text = _message_targets_bot(
             client,
             message,
