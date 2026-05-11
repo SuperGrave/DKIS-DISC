@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -38,6 +39,7 @@ DEFAULT_CHANNEL_SETTINGS = {
 }
 
 _client_cache: Any = None
+_channel_settings_cache: dict[str, tuple[float, dict[str, str]]] = {}
 
 
 def validate_memory_filename(name: str) -> str | None:
@@ -114,12 +116,35 @@ def normalize_channel_id(channel_id: str | int | None) -> str:
     return str(channel_id or "").strip()
 
 
-def get_channel_settings(channel_id: str | int | None) -> dict[str, str]:
+def _channel_settings_cache_seconds() -> int:
+    raw = (os.environ.get("CHANNEL_SETTINGS_CACHE_SECONDS") or "300").strip()
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 300
+
+
+def _remember_channel_settings_cache(cid: str, settings: dict[str, str]) -> None:
+    ttl = _channel_settings_cache_seconds()
+    if ttl <= 0:
+        _channel_settings_cache.pop(cid, None)
+        return
+    _channel_settings_cache[cid] = (time.monotonic() + ttl, dict(settings))
+
+
+def get_channel_settings(channel_id: str | int | None, *, use_cache: bool = True) -> dict[str, str]:
     """Discord channel_id ごとの会話入口・通知表示設定。未設定時は inherit。"""
     cid = normalize_channel_id(channel_id)
     out = dict(DEFAULT_CHANNEL_SETTINGS)
     if not cid:
         return out
+    if use_cache:
+        cached = _channel_settings_cache.get(cid)
+        if cached is not None:
+            expires_at, settings = cached
+            if expires_at > time.monotonic():
+                return dict(settings)
+            _channel_settings_cache.pop(cid, None)
     sb = _client()
     if sb is None:
         return out
@@ -133,6 +158,7 @@ def get_channel_settings(channel_id: str | int | None) -> dict[str, str]:
         )
         rows = r.data or []
         if not rows:
+            _remember_channel_settings_cache(cid, out)
             return out
         row = rows[0]
         enabled = row.get("enabled")
@@ -150,6 +176,7 @@ def get_channel_settings(channel_id: str | int | None) -> dict[str, str]:
             out["response_mode"] = response_mode
         if tool_notice_display in CHANNEL_TOOL_NOTICE_VALUES:
             out["tool_notice_display"] = tool_notice_display
+        _remember_channel_settings_cache(cid, out)
         return out
     except Exception:
         return out
@@ -177,7 +204,7 @@ def set_channel_setting(channel_id: str | int | None, key: str, value: str) -> t
     sb = _client()
     if sb is None:
         return False, "Supabase が未設定です（SUPABASE_URL / SUPABASE_KEY）。"
-    current = get_channel_settings(cid)
+    current = get_channel_settings(cid, use_cache=False)
     current[k] = v
     try:
         sb.table("channel_settings").upsert(
@@ -190,6 +217,7 @@ def set_channel_setting(channel_id: str | int | None, key: str, value: str) -> t
             },
             on_conflict="channel_id",
         ).execute()
+        _remember_channel_settings_cache(cid, current)
         return True, (
             f"channel {cid} の {k} を {v} にしました。\n"
             f"enabled={current['enabled']} / response_mode={current['response_mode']} / "

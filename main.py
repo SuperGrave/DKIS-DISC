@@ -34,7 +34,7 @@ from line_bot_app.supabase_store import (
 from line_bot_app.user_messages import MSG_SYSTEM_FAILURE
 
 logger = logging.getLogger("dkis_disc")
-DISCORD_HTTP_USER_AGENT = "DKIS-DISC (https://github.com/SuperGrave/DKIS-DISC, 1.0.0)"
+DISCORD_HTTP_USER_AGENT = "DKIS-DISC (https://github.com/SuperGrave/DKIS-DISC, 1.0.1)"
 DISCORD_ADMINISTRATOR_PERMISSION = 0x8
 USER_SETTING_KEYS = frozenset({"notify_worker_restart"})
 ADMIN_SETTING_KEYS = frozenset({"current_model", "show_ri_text", "tool_notice_display", "text.use_raw_result"})
@@ -559,7 +559,7 @@ def _start_self_ping() -> None:
     url = (os.environ.get("KEEPALIVE_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "").strip()
     if not url:
         return
-    interval = max(60, int(os.environ.get("KEEPALIVE_INTERVAL_SECONDS", "900")))
+    interval = max(60, int(os.environ.get("KEEPALIVE_INTERVAL_SECONDS", "300")))
 
     def ping_loop() -> None:
         while True:

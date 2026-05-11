@@ -28,9 +28,10 @@ Discord 上で動作する **DKIS 互換の軽量 AI ボット**です。`discor
 - `DISCORD_RESTART_ALLOWED_USER_IDS`（カンマ区切り。未設定時は Discord サーバー管理者だけが再起動可能）
 - `DISCORD_BOOT_GREETING_PUSH_STORE_LIMIT`（既定 `50`）
 - `DISCORD_BOOT_GREETING_SKIP_STORED_IDS`（`1` で DB の起動通知オプトインを無視）
+- `CHANNEL_SETTINGS_CACHE_SECONDS`（既定 `300`。`0` でチャンネル設定キャッシュ無効）
 - `PORT`（Render Web Service のヘルスチェック用。既定 `5000`）
-- `KEEPALIVE_URL` / `RENDER_EXTERNAL_URL`（15 分おきのセルフ ping 用）
-- `KEEPALIVE_INTERVAL_SECONDS`（既定 `900`）
+- `KEEPALIVE_URL` / `RENDER_EXTERNAL_URL`（5 分おきのセルフ ping 用）
+- `KEEPALIVE_INTERVAL_SECONDS`（既定 `300`）
 - `DISABLE_KEEPALIVE`（`1` でセルフ ping 無効）
 
 ## ローカル開発
@@ -61,6 +62,7 @@ uv run python dev_console.py
 3. 起動コマンドは `uv run python main.py` です。
 4. 環境変数に `DISCORD_BOT_TOKEN`、`DISCORD_CHANNEL_ID`、`OPENAI_API_KEY` を設定します。
 5. スリープ対策を使う場合は `KEEPALIVE_URL=https://<サービス名>.onrender.com/` を設定します。
+6. GitHub Actions の定期 ping を使う場合は Repository Variables に `KEEPALIVE_URL` を設定します。未設定時は `https://dkis-disc.onrender.com/` を5分ごとに叩きます。
 
 スラッシュコマンドは起動時にグローバル登録されるため、Bot を招待した各サーバーで使えます。反映を急ぎたいテストサーバーがある場合は `DISCORD_GUILD_ID` または `DISCORD_GUILD_IDS` にサーバーIDを入れると、そのサーバーにも即時反映用として登録します。
 
