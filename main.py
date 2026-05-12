@@ -285,7 +285,7 @@ def _status_mode(channel_count: int) -> str:
 
 async def _update_presence_once(client: discord.Client) -> None:
     guild_count = len(client.guilds)
-    enabled_channel_count, configurable_channel_count = _connected_channel_counts(client)
+    enabled_channel_count, configurable_channel_count = await asyncio.to_thread(_connected_channel_counts, client)
     recent_response_channel_count = _recent_response_channel_count()
     mode = _status_mode(enabled_channel_count)
     if mode == "sleep":
@@ -657,14 +657,14 @@ def create_bot(runtime: BotRuntime | None = None) -> discord.Client:
             logger,
             restart_push_enabled=config.restart_push_enabled,
         )
-        status_text = _build_boot_status_text(client, greeting)
+        status_text = await asyncio.to_thread(_build_boot_status_text, client, greeting)
         await _send_to_debug_rooms(client, status_text, channel_id)
 
     @client.event
     async def on_message(message: discord.Message) -> None:
         if message.author.bot:
             return
-        channel_settings = get_channel_settings(message.channel.id)
+        channel_settings = await asyncio.to_thread(get_channel_settings, message.channel.id)
         if channel_settings.get("channel_kind", "normal") == "debug":
             text = (message.content or "").strip()
             mentions_bot = client.user in message.mentions if client.user is not None else False
@@ -676,8 +676,8 @@ def create_bot(runtime: BotRuntime | None = None) -> discord.Client:
         if channel_settings.get("enabled", "off") != "on":
             return
         uid = _discord_user_key(message.author.id)
-        user_settings = get_discord_user_settings(uid)
-        role = _user_role(uid)
+        user_settings = await asyncio.to_thread(get_discord_user_settings, uid)
+        role = await asyncio.to_thread(_user_role, uid)
         if user_settings.get("talk_with_kiritan", "true") != "true":
             return
         should_reply, user_text = _message_targets_bot(
