@@ -35,12 +35,16 @@ CREATE TABLE IF NOT EXISTS user_settings (
 --   full | abbrev | minimal | hidden ... チャンネルごとに上書き
 -- process_notice:
 --   1 ... 非表示 / 2 ... 最小 / 3 ... 表示 / 4 ... 開発者用（AI原文）
+-- channel_kind:
+--   normal ... 通常チャンネル
+--   debug  ... 起動ステータスと運用コマンド用。通常会話は無効
 CREATE TABLE IF NOT EXISTS channel_settings (
     channel_id TEXT PRIMARY KEY,
     enabled BOOLEAN NOT NULL DEFAULT FALSE,
     response_mode TEXT NOT NULL DEFAULT 'inherit',
     tool_notice_display TEXT NOT NULL DEFAULT 'inherit',
     process_notice TEXT NOT NULL DEFAULT '2',
+    channel_kind TEXT NOT NULL DEFAULT 'normal',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -55,6 +59,7 @@ CREATE TABLE IF NOT EXISTS known_line_users (
     using_model TEXT NOT NULL DEFAULT '2',
     personal_memory BOOLEAN NOT NULL DEFAULT FALSE,
     response_criteria TEXT NOT NULL DEFAULT '1',
+    user_role TEXT NOT NULL DEFAULT 'visitor',
     conversation_count INTEGER NOT NULL DEFAULT 0,
     daily_token_date TEXT,
     daily_token_count INTEGER NOT NULL DEFAULT 0
@@ -82,6 +87,7 @@ ALTER TABLE known_line_users ADD COLUMN IF NOT EXISTS talking_memory TEXT NOT NU
 ALTER TABLE known_line_users ADD COLUMN IF NOT EXISTS using_model TEXT NOT NULL DEFAULT '2';
 ALTER TABLE known_line_users ADD COLUMN IF NOT EXISTS personal_memory BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE known_line_users ADD COLUMN IF NOT EXISTS response_criteria TEXT NOT NULL DEFAULT '1';
+ALTER TABLE known_line_users ADD COLUMN IF NOT EXISTS user_role TEXT NOT NULL DEFAULT 'visitor';
 ALTER TABLE known_line_users ADD COLUMN IF NOT EXISTS conversation_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE known_line_users ADD COLUMN IF NOT EXISTS daily_token_date TEXT;
 ALTER TABLE known_line_users ADD COLUMN IF NOT EXISTS daily_token_count INTEGER NOT NULL DEFAULT 0;
@@ -92,6 +98,7 @@ CREATE TABLE IF NOT EXISTS channel_settings (
     response_mode TEXT NOT NULL DEFAULT 'inherit',
     tool_notice_display TEXT NOT NULL DEFAULT 'inherit',
     process_notice TEXT NOT NULL DEFAULT '2',
+    channel_kind TEXT NOT NULL DEFAULT 'normal',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 ALTER TABLE channel_settings ENABLE ROW LEVEL SECURITY;
@@ -100,4 +107,5 @@ ALTER TABLE channel_settings ALTER COLUMN enabled SET DEFAULT FALSE;
 ALTER TABLE channel_settings ADD COLUMN IF NOT EXISTS response_mode TEXT NOT NULL DEFAULT 'inherit';
 ALTER TABLE channel_settings ADD COLUMN IF NOT EXISTS tool_notice_display TEXT NOT NULL DEFAULT 'inherit';
 ALTER TABLE channel_settings ADD COLUMN IF NOT EXISTS process_notice TEXT NOT NULL DEFAULT '2';
+ALTER TABLE channel_settings ADD COLUMN IF NOT EXISTS channel_kind TEXT NOT NULL DEFAULT 'normal';
 ALTER TABLE channel_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();

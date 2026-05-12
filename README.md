@@ -9,7 +9,7 @@ Discord 上で動作する **DKIS 互換の軽量 AI ボット**です。`discor
 - OpenAI は DKIS 形式の `[CMD]` / `[ARGS]` / `[ARGS-2]` を出力します。
 - `SEARCH` / `NEWS` / `WEATHER` / `READ-PAGE` はツール結果を RI として再投入し、必要に応じてリトライ連鎖します。
 - Supabase を設定すると、記憶ファイル・共通設定・中期記憶を永続化できます。
-- 起動時は `DISCORD_CHANNEL_ID` のチャンネルへ、JST の時間帯に応じた起動あいさつを送信します。
+- 起動時はデバッグルームへ、起動時刻・登録ユーザー数・本日トークン数などのステータスを送信します。デバッグルーム未設定時は `DISCORD_CHANNEL_ID` へ送信します。
 - 長文返信は Discord の 2,000 文字制限に合わせて `split_line_text` で分割し、順番に送信します。
 
 ## Environment Variables
@@ -27,6 +27,7 @@ Discord 上で動作する **DKIS 互換の軽量 AI ボット**です。`discor
 - `SUPABASE_URL` / `SUPABASE_KEY`（記憶コマンド用。未設定なら記憶系は案内エラーのみ）
 - `DISCORD_COMMAND_REGISTRATION_SCOPE`（既定 `global`。`guild` は即時反映テスト用、`both` は二重表示に注意）
 - `DISCORD_RESTART_ALLOWED_USER_IDS`（カンマ区切り。未設定時は Discord サーバー管理者だけが再起動可能）
+- `DISCORD_OPERATOR_USER_IDS`（カンマ区切り。デバッグルーム設定などの operator 権限を環境変数で付与）
 - `DISCORD_BOOT_GREETING_PUSH_STORE_LIMIT`（既定 `50`）
 - `DISCORD_BOOT_GREETING_SKIP_STORED_IDS`（`1` で DB の起動通知オプトインを無視）
 - `CHANNEL_SETTINGS_CACHE_SECONDS`（既定 `300`。`0` でチャンネル設定キャッシュ無効）
@@ -56,8 +57,10 @@ uv run python dev_console.py
 - 通常メッセージ: ボットが `AIResponder` を通して返信します。
 - `/get_setting`: ユーザー別設定と現在チャンネルの表示設定を確認します。
 - `/set_setting`: `value` を `true/false/1/2/3/4/5` から選び、ユーザー別設定または現在チャンネルの `process_notice` を変更します。
-- `/channel_setting`: 実行したチャンネルで bot を有効/無効にします（既定は無効）。
+- `/channel_setting`: 実行したチャンネルで bot を有効/無効にします（既定は無効）。operator は `debug` でデバッグルーム化、`normal` で通常チャンネルへ戻せます。
 - `サーバー再起動` / `再起動` / `restart` / `/restart`: 権限があれば `os.execv` でプロセスを再起動します。
+
+権限は `visitor` / `member` / `operator` の3段階です。`visitor` は本日100トークンまででモデル変更不可、`member` は本日100,000トークンまで、`operator` はデバッグルーム運用向けです。`operator` は Supabase の `known_line_users.user_role` または `DISCORD_OPERATOR_USER_IDS` で付与します。
 
 ## Render デプロイ
 

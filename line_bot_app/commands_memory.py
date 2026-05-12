@@ -12,6 +12,7 @@ from .config import AppConfig
 from .supabase_store import (
     append_mid_term_note,
     clear_mid_term_note,
+    daily_token_limit_for_role,
     dumps_memory_index,
     get_channel_settings,
     get_db_setting,
@@ -30,6 +31,7 @@ from .supabase_store import (
     set_discord_user_setting,
     set_notify_worker_restart,
     talking_memory_turns,
+    user_role_from_value,
     user_model_from_choice,
     validate_memory_filename,
 )
@@ -196,7 +198,7 @@ def cmd_mid_memory_clear(svc: CommandServices, args: dict, TEXT: str, NOTE: str 
 
 
 def _setting_line(name: str, label: str, value: str, value_label: str, desc: str, choices: str) -> str:
-    return f"{name:<20}<{label}>\n ={value} ({value_label})\n  →{desc}\n　　[{choices}]"
+    return f"{name:<20}<{label}>\n ={value} ({value_label})\n  →{desc}\n  [{choices}]"
 
 
 def cmd_get_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None, *, user_id=None):
@@ -215,7 +217,9 @@ def build_settings_text(config: AppConfig, user_id: str | None, channel_id: str 
     model = user_settings["using_model"]
     personal = user_settings["personal_memory"]
     response = user_settings["response_criteria"]
+    role = user_role_from_value(user_settings.get("user_role"))
     notice = channel_settings.get("process_notice", "2")
+    channel_kind = channel_settings.get("channel_kind", "normal")
     memory_labels = {"1": "15ターン保持", "2": "10ターン保持", "3": "5ターン保持", "4": "保持しない(非推奨)"}
     model_labels = {"1": "gpt-4.1-mini", "2": "gpt-5.4-mini", "3": "gpt-4o", "4": "gpt-5.2", "5": "gpt-5.4"}
     response_labels = {"1": "通常メッセージ", "2": "メンション付きメッセージ"}
@@ -241,14 +245,14 @@ def build_settings_text(config: AppConfig, user_id: str | None, channel_id: str 
             "1 : 15ターン保持  2 : 10ターン保持  3 : 5ターン保持  4 : 保持しない(非推奨)",
         ),
         "",
-        _setting_line(
+        "**" + _setting_line(
             "using model",
             "使用するモデル",
             model,
             model_labels.get(model, "gpt-5.4-mini"),
             "きりたんの応答に使用するモデルを変更します。",
             "1 : gpt-4.1-mini  2 : gpt-5.4-mini  3 : gpt-4o   4 : gpt-5.2  5 : gpt-5.4",
-        ),
+        ) + "**",
         "",
         _setting_line(
             "personal memory",
@@ -284,6 +288,10 @@ def build_settings_text(config: AppConfig, user_id: str | None, channel_id: str 
         f"ユーザーID          :{'' if uid == 'anonymous' else uid}",
         "",
         f"チャンネルID        :{channel_id or ''}",
+        "",
+        f"チャンネル種別      :{channel_kind}",
+        "",
+        f"権限                :{role}（本日上限 {daily_token_limit_for_role(role)} トークン）",
         "",
         f"きりたんとの会話回数:{stats['conversation_count']}回",
         "",
@@ -336,6 +344,10 @@ def set_setting_value(config: AppConfig, key: str, val: str, user_id: str | None
             return False, err or "不明なエラー"
         line = f"process_notice を {val}（{process_notice_mode_from_choice(val)}）にしました。"
         return True, line
+
+    current_role = user_role_from_value(get_discord_user_settings(user_id or "").get("user_role"))
+    if current_role == "visitor" and key == "using_model":
+        return False, "visitor は using_model を変更できません。member 以上が必要です。"
 
     ok, err = set_discord_user_setting(user_id or "", key, val)
     if not ok:

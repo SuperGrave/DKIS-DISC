@@ -39,21 +39,26 @@ USER_MODEL_CHOICES = {
 TALKING_MEMORY_TURNS = {"1": 15, "2": 10, "3": 5, "4": 0}
 USER_RESPONSE_MODES = {"1": "normal", "2": "mention"}
 PROCESS_NOTICE_MODES = {"1": "hidden", "2": "abbrev", "3": "full", "4": "raw"}
+USER_ROLES = frozenset({"visitor", "member", "operator"})
+ROLE_DAILY_TOKEN_LIMITS = {"visitor": 100, "member": 100_000, "operator": 100_000}
 DEFAULT_USER_SETTINGS = {
     "talk_with_kiritan": "true",
     "talking_memory": "1",
     "using_model": "2",
     "personal_memory": "false",
     "response_criteria": "1",
+    "user_role": "visitor",
 }
 CHANNEL_ENABLED_VALUES = frozenset({"on", "off", "enabled", "disabled", "true", "false", "1", "0", "yes", "no"})
 CHANNEL_RESPONSE_MODES = frozenset({"inherit", "normal", "mention", "off"})
 CHANNEL_TOOL_NOTICE_VALUES = frozenset({"inherit", "full", "abbrev", "minimal", "hidden", "raw"})
+CHANNEL_KINDS = frozenset({"normal", "debug"})
 DEFAULT_CHANNEL_SETTINGS = {
     "enabled": "off",
     "response_mode": "inherit",
     "tool_notice_display": "abbrev",
     "process_notice": "2",
+    "channel_kind": "normal",
 }
 
 _client_cache: Any = None
@@ -166,6 +171,15 @@ def process_notice_mode_from_choice(choice: str | int | None) -> str:
     return PROCESS_NOTICE_MODES.get(str(choice or "").strip(), PROCESS_NOTICE_MODES[DEFAULT_CHANNEL_SETTINGS["process_notice"]])
 
 
+def user_role_from_value(value: str | None) -> str:
+    raw = str(value or "").strip().lower()
+    return raw if raw in USER_ROLES else DEFAULT_USER_SETTINGS["user_role"]
+
+
+def daily_token_limit_for_role(role: str | None) -> int:
+    return ROLE_DAILY_TOKEN_LIMITS.get(user_role_from_value(role), ROLE_DAILY_TOKEN_LIMITS["visitor"])
+
+
 def _normalize_user_settings(row: dict[str, Any] | None = None) -> dict[str, str]:
     row = row or {}
     out = dict(DEFAULT_USER_SETTINGS)
@@ -174,6 +188,7 @@ def _normalize_user_settings(row: dict[str, Any] | None = None) -> dict[str, str
     out["using_model"] = _as_choice(row.get("using_model"), USER_MODEL_CHOICES, out["using_model"])
     out["personal_memory"] = _bool_text(row.get("personal_memory"), default=False)
     out["response_criteria"] = _as_choice(row.get("response_criteria"), USER_RESPONSE_MODES, out["response_criteria"])
+    out["user_role"] = user_role_from_value(row.get("user_role"))
     return out
 
 
@@ -187,7 +202,7 @@ def get_discord_user_settings(uid: str | None) -> dict[str, str]:
     try:
         r = (
             sb.table("known_line_users")
-            .select("talk_with_kiritan,talking_memory,using_model,personal_memory,response_criteria")
+            .select("talk_with_kiritan,talking_memory,using_model,personal_memory,response_criteria,user_role")
             .eq("line_user_id", u)
             .limit(1)
             .execute()
@@ -195,7 +210,18 @@ def get_discord_user_settings(uid: str | None) -> dict[str, str]:
         rows = r.data or []
         return _normalize_user_settings(rows[0] if rows else None)
     except Exception:
-        return dict(DEFAULT_USER_SETTINGS)
+        try:
+            r = (
+                sb.table("known_line_users")
+                .select("talk_with_kiritan,talking_memory,using_model,personal_memory,response_criteria")
+                .eq("line_user_id", u)
+                .limit(1)
+                .execute()
+            )
+            rows = r.data or []
+            return _normalize_user_settings(rows[0] if rows else None)
+        except Exception:
+            return dict(DEFAULT_USER_SETTINGS)
 
 
 def set_discord_user_setting(uid: str | None, key: str, value: str) -> tuple[bool, str]:
@@ -217,8 +243,11 @@ def set_discord_user_setting(uid: str | None, key: str, value: str) -> tuple[boo
     elif k == "response_criteria":
         if v not in USER_RESPONSE_MODES:
             return False, "response_criteria の value は 1/2 です。"
+    elif k == "user_role":
+        if v not in USER_ROLES:
+            return False, "user_role の value は visitor/member/operator です。"
     else:
-        return False, "key は talk_with_kiritan, talking_memory, using_model, personal_memory, response_criteria, process_notice のいずれかです。"
+        return False, "key は talk_with_kiritan, talking_memory, using_model, personal_memory, response_criteria, user_role のいずれかです。"
     current[k] = v
     sb = _client()
     if sb is None:
@@ -266,6 +295,33 @@ def get_discord_user_stats(uid: str | None) -> dict[str, int | str]:
         out["mid_term_note_chars"] = len(str(row.get("mid_term_note") or ""))
         today = datetime.now(timezone.utc).date().isoformat()
         out["daily_token_count"] = int(row.get("daily_token_count") or 0) if row.get("daily_token_date") == today else 0
+        return out
+    except Exception:
+        return out
+
+
+def get_runtime_usage_summary() -> dict[str, int]:
+    """起動通知用の概況。列が未移行でも通知自体は落とさない。"""
+    out = {
+        "registered_users": 0,
+        "active_users_today": 0,
+        "daily_token_count": 0,
+    }
+    sb = _client()
+    if sb is None:
+        return out
+    today = datetime.now(timezone.utc).date().isoformat()
+    try:
+        r = sb.table("known_line_users").select("line_user_id,daily_token_date,daily_token_count").execute()
+        rows = r.data or []
+        out["registered_users"] = len(rows)
+        for row in rows:
+            if row.get("daily_token_date") != today:
+                continue
+            count = int(row.get("daily_token_count") or 0)
+            if count > 0:
+                out["active_users_today"] += 1
+                out["daily_token_count"] += count
         return out
     except Exception:
         return out
@@ -367,6 +423,9 @@ def get_channel_settings(channel_id: str | int | None, *, use_cache: bool = True
             out["response_mode"] = response_mode
         if tool_notice_display in CHANNEL_TOOL_NOTICE_VALUES:
             out["tool_notice_display"] = tool_notice_display
+        channel_kind = str(row.get("channel_kind") or "normal").strip().lower()
+        if channel_kind in CHANNEL_KINDS:
+            out["channel_kind"] = channel_kind
         if process_notice in PROCESS_NOTICE_MODES:
             out["process_notice"] = process_notice
             out["tool_notice_display"] = process_notice_mode_from_choice(process_notice)
@@ -382,6 +441,28 @@ def get_channel_settings(channel_id: str | int | None, *, use_cache: bool = True
         return out
     except Exception:
         return out
+
+
+def list_debug_channel_ids() -> list[str]:
+    sb = _client()
+    if sb is None:
+        return []
+    try:
+        r = (
+            sb.table("channel_settings")
+            .select("channel_id")
+            .eq("channel_kind", "debug")
+            .order("updated_at", desc=True)
+            .execute()
+        )
+        out: list[str] = []
+        for row in r.data or []:
+            cid = normalize_channel_id(row.get("channel_id"))
+            if cid:
+                out.append(cid)
+        return out
+    except Exception:
+        return []
 
 
 def set_channel_setting(channel_id: str | int | None, key: str, value: str) -> tuple[bool, str]:
@@ -404,8 +485,11 @@ def set_channel_setting(channel_id: str | int | None, key: str, value: str) -> t
     elif k == "tool_notice_display":
         if v not in CHANNEL_TOOL_NOTICE_VALUES:
             return False, f"tool_notice_display は {sorted(CHANNEL_TOOL_NOTICE_VALUES)} のいずれかです。"
+    elif k == "channel_kind":
+        if v not in CHANNEL_KINDS:
+            return False, "channel_kind は normal/debug のいずれかです。"
     else:
-        return False, "key は enabled または process_notice です。"
+        return False, "key は enabled / process_notice / response_mode / tool_notice_display / channel_kind のいずれかです。"
     sb = _client()
     if sb is None:
         return False, "Supabase が未設定です（SUPABASE_URL / SUPABASE_KEY）。"
@@ -413,6 +497,9 @@ def set_channel_setting(channel_id: str | int | None, key: str, value: str) -> t
     current[k] = v
     if k == "process_notice":
         current["tool_notice_display"] = process_notice_mode_from_choice(v)
+    if k == "channel_kind" and v == "debug":
+        current["enabled"] = "off"
+        current["response_mode"] = "off"
     try:
         sb.table("channel_settings").upsert(
             {
@@ -421,6 +508,7 @@ def set_channel_setting(channel_id: str | int | None, key: str, value: str) -> t
                 "response_mode": current["response_mode"],
                 "tool_notice_display": current["tool_notice_display"],
                 "process_notice": current["process_notice"],
+                "channel_kind": current["channel_kind"],
                 "updated_at": _now_iso(),
             },
             on_conflict="channel_id",
@@ -428,7 +516,7 @@ def set_channel_setting(channel_id: str | int | None, key: str, value: str) -> t
         _remember_channel_settings_cache(cid, current)
         return True, (
             f"channel {cid} の {k} を {v} にしました。\n"
-            f"enabled={current['enabled']} / process_notice={current['process_notice']}"
+            f"enabled={current['enabled']} / process_notice={current['process_notice']} / channel_kind={current['channel_kind']}"
         )
     except Exception as exc:
         return False, str(exc)
