@@ -40,7 +40,7 @@ from line_bot_app.supabase_store import (
 from line_bot_app.user_messages import MSG_SYSTEM_FAILURE
 
 logger = logging.getLogger("dkis_disc")
-DISCORD_HTTP_USER_AGENT = "DKIS-DISC (https://github.com/SuperGrave/DKIS-DISC, 1.2.3)"
+DISCORD_HTTP_USER_AGENT = "DKIS-DISC (https://github.com/SuperGrave/DKIS-DISC, 1.2.4)"
 DISCORD_ADMINISTRATOR_PERMISSION = 0x8
 RECENT_RESPONSE_WINDOW_SECONDS = 10 * 60
 USER_SETTING_KEYS = frozenset(
