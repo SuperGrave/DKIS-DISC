@@ -43,7 +43,6 @@ USER_RESPONSE_MODES = {"1": "normal", "2": "mention"}
 PROCESS_NOTICE_MODES = {"1": "hidden", "2": "abbrev", "3": "full", "4": "raw"}
 USER_ROLES = frozenset({"visitor", "member", "operator"})
 ROLE_DAILY_TOKEN_LIMITS = {"visitor": 1_000_000, "member": 10_000_000, "operator": 10_000_000}
-DAILY_MESSAGE_CHANNEL_SETTING_KEY = "discord.daily_message_channel_id"
 DEFAULT_USER_SETTINGS = {
     "talk_with_kiritan": "true",
     "talking_memory": "1",
@@ -136,27 +135,6 @@ def set_db_setting(key: str, value: str) -> tuple[bool, str]:
         return True, ""
     except Exception as exc:
         return False, str(exc)
-
-
-def get_daily_message_channel_id(default: str = "") -> str:
-    return get_db_setting(DAILY_MESSAGE_CHANNEL_SETTING_KEY, default).strip()
-
-
-def set_daily_message_channel_id(channel_id: str | int | None) -> tuple[bool, str]:
-    cid = normalize_channel_id(channel_id)
-    if not cid:
-        return False, "channel_id が空です。"
-    ok, err = set_db_setting(DAILY_MESSAGE_CHANNEL_SETTING_KEY, cid)
-    if not ok:
-        return False, err
-    return True, f"まいにちメッセージ送信先を channel {cid} にしました。"
-
-
-def clear_daily_message_channel_id() -> tuple[bool, str]:
-    ok, err = set_db_setting(DAILY_MESSAGE_CHANNEL_SETTING_KEY, "")
-    if not ok:
-        return False, err
-    return True, "まいにちメッセージ送信先を未設定に戻しました。"
 
 
 def normalize_channel_id(channel_id: str | int | None) -> str:

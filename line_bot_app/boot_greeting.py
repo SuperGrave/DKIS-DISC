@@ -218,8 +218,8 @@ def maybe_build_worker_boot_greeting(
     *,
     restart_push_enabled: bool = True,
 ) -> str | None:
-    """起動時に定型 Push。
-    - ``DISCORD_CHANNEL_ID`` …起動時に投稿するチャンネル
+    """起動時に定型あいさつ文を用意する。
+    - 投稿の実際の送信先は ``main.py`` の ``on_ready`` が決める（``channel_kind=debug`` があればそこへ、無ければ ``DISCORD_CHANNEL_ID``）
     - Supabase の ``known_line_users.notify_on_restart=true`` …ユーザーが **SET-SETTING** でオプトインした Id のみ（任意・上限あり）
 
     ``notify_worker_restart`` をオンにしたユーザーへは、次の 1 回の応答生成で
