@@ -26,7 +26,9 @@ from line_bot_app.config import AppConfig
 from line_bot_app.commands_memory import build_settings_text, set_setting_value
 from line_bot_app.line_messages import split_line_text
 from line_bot_app.supabase_store import (
+    clear_daily_message_channel_id,
     daily_token_limit_for_role,
+    get_daily_message_channel_id,
     get_discord_user_stats,
     get_discord_user_settings,
     get_channel_settings,
@@ -34,13 +36,14 @@ from line_bot_app.supabase_store import (
     list_debug_channel_ids,
     remember_discord_user_for_push,
     response_mode_from_criteria,
+    set_daily_message_channel_id,
     set_channel_setting,
     user_role_from_value,
 )
 from line_bot_app.user_messages import MSG_SYSTEM_FAILURE
 
 logger = logging.getLogger("dkis_disc")
-DISCORD_HTTP_USER_AGENT = "DKIS-DISC (https://github.com/SuperGrave/DKIS-DISC, 1.2.1)"
+DISCORD_HTTP_USER_AGENT = "DKIS-DISC (https://github.com/SuperGrave/DKIS-DISC, 1.2.2)"
 DISCORD_ADMINISTRATOR_PERMISSION = 0x8
 RECENT_RESPONSE_WINDOW_SECONDS = 10 * 60
 USER_SETTING_KEYS = frozenset(
@@ -97,6 +100,19 @@ def _discord_channel_id() -> int | None:
         return int(raw)
     except ValueError:
         logger.error("DISCORD_CHANNEL_ID must be an integer: %r", raw)
+        return None
+
+
+def _daily_message_channel_id() -> int | None:
+    db_or_env = get_daily_message_channel_id(
+        (os.environ.get("DISCORD_DAILY_MESSAGE_CHANNEL_ID") or os.environ.get("DISCORD_CHANNEL_ID") or "").strip()
+    )
+    if not db_or_env:
+        return None
+    try:
+        return int(db_or_env)
+    except ValueError:
+        logger.error("Daily message channel id must be an integer: %r", db_or_env)
         return None
 
 
@@ -469,6 +485,8 @@ def _channel_setting_value_choices() -> list[dict]:
         {"name": "false（無効）", "value": "false"},
         {"name": "debug（デバッグルーム化/operator）", "value": "debug"},
         {"name": "normal（通常チャンネルへ戻す/operator）", "value": "normal"},
+        {"name": "daily（まいにちメッセージ送信先にする/operator）", "value": "daily"},
+        {"name": "daily_off（まいにち送信先を未設定に戻す/operator）", "value": "daily_off"},
     ]
 
 
@@ -478,11 +496,13 @@ def _resolve_interaction_channel_option(payload: dict, options: dict[str, str]) 
 
 def _format_channel_settings_text(channel_id: str) -> str:
     settings = get_channel_settings(channel_id)
+    daily_channel_id = _daily_message_channel_id()
     return (
         f"channel_id: {channel_id or '(unknown)'}\n"
         f"enabled: {settings.get('enabled', 'off')}\n"
         f"process_notice: {settings.get('process_notice', '2')}\n"
-        f"channel_kind: {settings.get('channel_kind', 'normal')}"
+        f"channel_kind: {settings.get('channel_kind', 'normal')}\n"
+        f"daily_message_channel: {'yes' if daily_channel_id and str(daily_channel_id) == str(channel_id) else 'no'}"
     )
 
 
@@ -498,6 +518,8 @@ def _is_channel_enable_command(command: str, options: dict[str, str]) -> bool:
         "yes",
         "debug",
         "normal",
+        "daily",
+        "daily_off",
     }
 
 
@@ -544,12 +566,18 @@ def _build_interaction_command_response(runtime: BotRuntime, payload: dict) -> d
 
         if command == "channel_setting":
             channel_value = (options.get("value") or "").strip().lower()
-            if channel_value in {"debug", "normal"}:
+            if channel_value in {"debug", "normal", "daily", "daily_off"}:
                 if not _interaction_is_operator(payload, uid):
                     return _interaction_message_response(
-                        "デバッグルーム設定は operator または `DISCORD_OPERATOR_USER_IDS` のユーザーだけ変更できます。"
+                        "チャンネル種別・まいにちメッセージ送信先の変更は operator または `DISCORD_OPERATOR_USER_IDS` のユーザーだけできます。"
                     )
                 channel_id = _interaction_channel_id(payload)
+                if channel_value == "daily":
+                    ok, line = set_daily_message_channel_id(channel_id)
+                    return _interaction_message_response(line)
+                if channel_value == "daily_off":
+                    ok, line = clear_daily_message_channel_id()
+                    return _interaction_message_response(line)
                 kind = "debug" if channel_value == "debug" else "normal"
                 ok, line = set_channel_setting(channel_id, "channel_kind", kind)
                 if ok and kind == "debug":
@@ -709,13 +737,13 @@ def _discord_command_definitions(config: AppConfig) -> list[dict]:
         },
         {
             "name": "channel_setting",
-            "description": "このチャンネルでDKIS-DISCを有効/無効にします（管理者のみ）。",
+            "description": "このチャンネルの利用可否、種別、まいにち送信先を設定します。",
             "type": 1,
             "options": [
                 {
                     "type": 3,
                     "name": "value",
-                    "description": "trueで有効、falseで無効",
+                    "description": "true/false/debug/normal/daily/daily_off",
                     "required": True,
                     "choices": _channel_setting_value_choices(),
                 },
@@ -842,9 +870,9 @@ def create_bot(runtime: BotRuntime | None = None) -> discord.Client:
             return
         boot_greeting_sent = True
 
-        channel_id = _discord_channel_id()
+        channel_id = _daily_message_channel_id()
         if channel_id is None:
-            logger.info("DISCORD_CHANNEL_ID is not set; boot greeting skipped")
+            logger.info("Daily message channel is not set; boot greeting skipped")
             return
 
         greeting = maybe_build_worker_boot_greeting(

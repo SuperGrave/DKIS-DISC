@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import TYPE_CHECKING, Any
 
 from openai import OpenAI
@@ -15,6 +16,7 @@ from .supabase_store import (
     daily_token_limit_for_role,
     dumps_memory_index,
     get_channel_settings,
+    get_daily_message_channel_id,
     get_db_setting,
     get_discord_user_settings,
     get_discord_user_stats,
@@ -198,7 +200,12 @@ def cmd_mid_memory_clear(svc: CommandServices, args: dict, TEXT: str, NOTE: str 
 
 
 def _setting_line(name: str, label: str, value: str, value_label: str, desc: str, choices: str) -> str:
-    return f"{name:<20}<{label}>\n ={value} ({value_label})\n  →{desc}\n  [{choices}]"
+    return f"**{name:<20}<{label}>**\n ={value} ({value_label})\n  →{desc}\n  [{choices}]"
+
+
+def _effective_daily_message_channel_id() -> str:
+    fallback = (os.environ.get("DISCORD_DAILY_MESSAGE_CHANNEL_ID") or os.environ.get("DISCORD_CHANNEL_ID") or "").strip()
+    return get_daily_message_channel_id(fallback)
 
 
 def cmd_get_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | None = None, *, user_id=None):
@@ -220,6 +227,7 @@ def build_settings_text(config: AppConfig, user_id: str | None, channel_id: str 
     role = user_role_from_value(user_settings.get("user_role"))
     notice = channel_settings.get("process_notice", "2")
     channel_kind = channel_settings.get("channel_kind", "normal")
+    daily_channel_id = _effective_daily_message_channel_id()
     memory_labels = {"1": "15ターン保持", "2": "10ターン保持", "3": "5ターン保持", "4": "保持しない(非推奨)"}
     model_labels = {"1": "gpt-4.1-mini", "2": "gpt-5.4-mini", "3": "gpt-4o", "4": "gpt-5.2", "5": "gpt-5.4"}
     response_labels = {"1": "通常メッセージ", "2": "メンション付きメッセージ"}
@@ -245,14 +253,14 @@ def build_settings_text(config: AppConfig, user_id: str | None, channel_id: str 
             "1 : 15ターン保持  2 : 10ターン保持  3 : 5ターン保持  4 : 保持しない(非推奨)",
         ),
         "",
-        "**" + _setting_line(
+        _setting_line(
             "using model",
             "使用するモデル",
             model,
             model_labels.get(model, "gpt-5.4-mini"),
             "きりたんの応答に使用するモデルを変更します。",
             "1 : gpt-4.1-mini  2 : gpt-5.4-mini  3 : gpt-4o   4 : gpt-5.2  5 : gpt-5.4",
-        ) + "**",
+        ),
         "",
         _setting_line(
             "personal memory",
@@ -291,7 +299,10 @@ def build_settings_text(config: AppConfig, user_id: str | None, channel_id: str 
         "",
         f"チャンネル種別      :{channel_kind}",
         "",
-        f"権限                :{role}（本日上限 {daily_token_limit_for_role(role)} トークン）",
+        f"まいにち送信先      :{'このチャンネル' if daily_channel_id and str(channel_id or '') == daily_channel_id else '別チャンネル/未設定'}"
+        f"{f'（channel_id={daily_channel_id}）' if daily_channel_id else ''}",
+        "",
+        f"権限                :{role}（本日上限 {daily_token_limit_for_role(role):,} トークン）",
         "",
         f"きりたんとの会話回数:{stats['conversation_count']}回",
         "",

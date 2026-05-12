@@ -4,6 +4,7 @@
 --
 -- 記憶 memory_files: Discord の user_id を互換列 line_user_id に格納してファイルを分離
 -- 設定 user_settings: setting_key ごとに 1 値のみ（全ユーザー共通）
+--   discord.daily_message_channel_id ... まいにちメッセージ/起動通知の送信先 channel_id
 
 CREATE TABLE IF NOT EXISTS memory_files (
     line_user_id TEXT NOT NULL DEFAULT '__legacy_shared__',
