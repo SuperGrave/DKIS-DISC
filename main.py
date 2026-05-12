@@ -540,19 +540,19 @@ def create_bot(runtime: BotRuntime | None = None) -> discord.Client:
 
     @tree.command(name="get_setting", description="DKIS-DISCの現在設定を表示します。")
     async def slash_get_setting(interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
         channel_id = str(interaction.channel_id or "")
         channel_settings = get_channel_settings(channel_id)
         if channel_settings.get("channel_kind", "normal") != "debug" and channel_settings.get("enabled", "off") != "on":
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"このチャンネルはDKIS-DISCの利用設定が無効です。\n"
                 f"管理者が `/channel_setting value:true` をこのチャンネルで実行すると有効に戻せます。channel_id={channel_id}",
-                ephemeral=True,
             )
             return
         uid = _discord_user_key(interaction.user.id)
         text = _format_settings_text(config, uid, channel_id)
         chunks = split_line_text(text, max_chunks=1)
-        await interaction.response.send_message(chunks[0] if chunks else MSG_SYSTEM_FAILURE, ephemeral=True)
+        await interaction.followup.send(chunks[0] if chunks else MSG_SYSTEM_FAILURE)
 
     @tree.command(name="set_setting", description="DKIS-DISCの設定を変更します。")
     @app_commands.describe(key="変更する設定キー", value="保存する値（true/false/1/2/3/4/5）")
@@ -576,24 +576,23 @@ def create_bot(runtime: BotRuntime | None = None) -> discord.Client:
         ],
     )
     async def slash_set_setting(interaction: discord.Interaction, key: str, value: str) -> None:
+        await interaction.response.defer(ephemeral=True)
         channel_id = str(interaction.channel_id or "")
         channel_settings = get_channel_settings(channel_id)
         if channel_settings.get("channel_kind", "normal") != "debug" and channel_settings.get("enabled", "off") != "on":
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"このチャンネルはDKIS-DISCの利用設定が無効です。channel_id={channel_id}",
-                ephemeral=True,
             )
             return
         uid = _discord_user_key(interaction.user.id)
         role = _user_role(uid)
         if role == "visitor" and key == "using_model":
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "visitor は using_model を変更できません。member 以上が必要です。",
-                ephemeral=True,
             )
             return
         ok, line = set_setting_value(config, key, value, uid, channel_id)
-        await interaction.response.send_message(line, ephemeral=True)
+        await interaction.followup.send(line)
 
     @tree.command(
         name="channel_setting",
@@ -609,29 +608,28 @@ def create_bot(runtime: BotRuntime | None = None) -> discord.Client:
         ]
     )
     async def slash_channel_setting(interaction: discord.Interaction, value: str) -> None:
+        await interaction.response.defer(ephemeral=True)
         channel_id = str(interaction.channel_id or "")
         value_lower = value.strip().lower()
         if value_lower in {"debug", "normal"}:
             if not _is_interaction_operator(interaction):
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "デバッグルーム設定は operator または `DISCORD_OPERATOR_USER_IDS` のユーザーだけ変更できます。",
-                    ephemeral=True,
                 )
                 return
             kind = "debug" if value_lower == "debug" else "normal"
             ok, line = set_channel_setting(channel_id, "channel_kind", kind)
             if ok and kind == "debug":
                 line += "\nこのチャンネルはデバッグルームです。通常会話は無効で、起動通知などの専用通知が届きます。"
-            await interaction.response.send_message(line, ephemeral=True)
+            await interaction.followup.send(line)
             return
         if not _is_interaction_admin(interaction):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "チャンネル設定はDiscord管理者または `DISCORD_ADMIN_USER_IDS` のユーザーだけ変更できます。",
-                ephemeral=True,
             )
             return
         ok, line = set_channel_setting(channel_id, "enabled", value)
-        await interaction.response.send_message(line, ephemeral=True)
+        await interaction.followup.send(line)
 
     # -------------------------------------------------------
     # イベントハンドラ
