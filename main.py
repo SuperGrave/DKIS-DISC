@@ -356,8 +356,8 @@ def _is_interaction_operator(interaction: discord.Interaction) -> bool:
     return _is_operator_user(uid)
 
 
-def _format_settings_text(config: AppConfig, user_id: str | None, channel_id: str) -> str:
-    return build_settings_text(config, user_id, channel_id)
+def _format_settings_text(config: AppConfig, user_id: str | None, channel_id: str, role_override: str | None = None) -> str:
+    return build_settings_text(config, user_id, channel_id, role_override=role_override)
 
 
 def _discord_command_guild_ids() -> list[str]:
@@ -550,7 +550,8 @@ def create_bot(runtime: BotRuntime | None = None) -> discord.Client:
             )
             return
         uid = _discord_user_key(interaction.user.id)
-        text = _format_settings_text(config, uid, channel_id)
+        role = _user_role(uid)
+        text = _format_settings_text(config, uid, channel_id, role_override=role)
         chunks = split_line_text(text, max_chunks=1)
         await interaction.followup.send(chunks[0] if chunks else MSG_SYSTEM_FAILURE)
 

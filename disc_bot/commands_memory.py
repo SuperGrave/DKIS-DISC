@@ -207,7 +207,7 @@ def cmd_get_setting(svc: CommandServices, args: dict, TEXT: str, NOTE: str | Non
     return TEXT or "", "GET-SETTING (all)", line, None, None
 
 
-def build_settings_text(config: AppConfig, user_id: str | None, channel_id: str | None = None) -> str:
+def build_settings_text(config: AppConfig, user_id: str | None, channel_id: str | None = None, *, role_override: str | None = None) -> str:
     uid = normalize_memory_user_id(user_id or "")
     user_settings = get_discord_user_settings(uid)
     channel_settings = get_channel_settings(channel_id or "")
@@ -217,7 +217,7 @@ def build_settings_text(config: AppConfig, user_id: str | None, channel_id: str 
     model = user_settings["using_model"]
     personal = user_settings["personal_memory"]
     response = user_settings["response_criteria"]
-    role = user_role_from_value(user_settings.get("user_role"))
+    role = role_override if role_override else user_role_from_value(user_settings.get("user_role"))
     notice = channel_settings.get("process_notice", "2")
     channel_kind = channel_settings.get("channel_kind", "normal")
     memory_labels = {"1": "15ターン保持", "2": "10ターン保持", "3": "5ターン保持", "4": "保持しない(非推奨)"}
