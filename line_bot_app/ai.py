@@ -1,5 +1,5 @@
-"""後方互換: LineBrain のエイリアス。"""
+"""Discord bot 入口向け AI 応答エンジンのエイリアス。"""
 
-from .engine import LineBrain
+from .engine import DiscordBrain
 
-AIResponder = LineBrain
+AIResponder = DiscordBrain

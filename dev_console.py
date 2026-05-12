@@ -1,4 +1,4 @@
-"""開発用: Discord bot と同じ AIResponder(LineBrain).reply 経路をコンソールで試す。
+"""開発用: Discord bot と同じ AIResponder(DiscordBrain).reply 経路をコンソールで試す。
 
 本番デプロイ前に削除してください。
 """
@@ -27,7 +27,7 @@ def main() -> None:
 
     load_dotenv(_PROJECT_ROOT / ".env")
     try:
-        config = load_config(require_line_credentials=False)
+        config = load_config(require_discord_credentials=False)
     except RuntimeError as exc:
         print(exc)
         print()

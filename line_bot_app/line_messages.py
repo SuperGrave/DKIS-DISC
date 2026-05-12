@@ -3,6 +3,7 @@ from __future__ import annotations
 from .user_messages import MSG_EMPTY_REPLY
 
 DISCORD_TEXT_LIMIT = 2000
+# 旧 import 名の互換。Discord でも同じ 2,000 文字制限を使う。
 LINE_TEXT_LIMIT = DISCORD_TEXT_LIMIT
 MAX_REPLY_MESSAGES = 5
 
@@ -33,7 +34,7 @@ def split_line_text(text: str, *, max_chunks: int | None = None) -> list[str]:
 
 
 def flatten_reply_parts(parts: list[str]) -> list[str]:
-    """旧 LINE 入口向け互換。Discord 入口では split_line_text を直接使う。"""
+    """旧入口向け互換。Discord 入口では split_line_text を直接使う。"""
     cleaned = [(p or "").strip() for p in parts if (p or "").strip()]
     if not cleaned:
         return split_line_text("")

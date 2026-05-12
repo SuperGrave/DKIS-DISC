@@ -40,13 +40,15 @@ from line_bot_app.supabase_store import (
 from line_bot_app.user_messages import MSG_SYSTEM_FAILURE
 
 logger = logging.getLogger("dkis_disc")
-DISCORD_HTTP_USER_AGENT = "DKIS-DISC (https://github.com/SuperGrave/DKIS-DISC, 1.2.0)"
+DISCORD_HTTP_USER_AGENT = "DKIS-DISC (https://github.com/SuperGrave/DKIS-DISC, 1.2.1)"
 DISCORD_ADMINISTRATOR_PERMISSION = 0x8
+RECENT_RESPONSE_WINDOW_SECONDS = 10 * 60
 USER_SETTING_KEYS = frozenset(
     {"talk_with_kiritan", "talking_memory", "using_model", "personal_memory", "response_criteria", "process_notice"}
 )
 ADMIN_SETTING_KEYS = frozenset()
 CHANNEL_SETTING_KEYS = frozenset({"enabled", "channel_kind"})
+_recent_response_channels: dict[int, float] = {}
 
 
 @dataclass(frozen=True)
@@ -229,9 +231,31 @@ def _ram_usage_label() -> str:
     current = _read_int_file("/sys/fs/cgroup/memory.current")
     limit = _read_int_file("/sys/fs/cgroup/memory.max")
     if current is None or limit is None or limit <= 0:
-        return "RAM--%"
+        return "RAM:--%"
     pct = max(0, min(999, round(current / limit * 100)))
-    return f"RAM{pct}%"
+    return f"RAM:{pct}%"
+
+
+def _remember_response_channel(channel_id: int | str | None) -> None:
+    try:
+        cid = int(channel_id or 0)
+    except (TypeError, ValueError):
+        return
+    if cid <= 0:
+        return
+    _recent_response_channels[cid] = time.monotonic()
+
+
+def _recent_response_channel_count() -> int:
+    now = time.monotonic()
+    expired = [
+        cid
+        for cid, last_at in _recent_response_channels.items()
+        if now - last_at > RECENT_RESPONSE_WINDOW_SECONDS
+    ]
+    for cid in expired:
+        _recent_response_channels.pop(cid, None)
+    return len(_recent_response_channels)
 
 
 def _channel_is_enabled(channel_id: str | int | None) -> bool:
@@ -267,7 +291,8 @@ def _status_mode(channel_count: int) -> str:
 
 async def _update_presence_once(client: discord.Client) -> None:
     guild_count = len(client.guilds)
-    enabled_channel_count, channel_count = _connected_channel_counts(client)
+    enabled_channel_count, configurable_channel_count = _connected_channel_counts(client)
+    recent_response_channel_count = _recent_response_channel_count()
     mode = _status_mode(enabled_channel_count)
     if mode == "sleep":
         await client.change_presence(
@@ -276,7 +301,11 @@ async def _update_presence_once(client: discord.Client) -> None:
         )
         return
 
-    label = f"run in {guild_count}sb({enabled_channel_count}/{channel_count}ch) {_ram_usage_label()}"
+    label = (
+        f"run in {guild_count}sb "
+        f"({recent_response_channel_count}/{enabled_channel_count}/{configurable_channel_count}ch) "
+        f"{_ram_usage_label()}"
+    )
     await client.change_presence(
         status=discord.Status.online,
         activity=discord.Activity(type=discord.ActivityType.watching, name=label),
@@ -295,7 +324,7 @@ async def _presence_loop(client: discord.Client) -> None:
 
 def _build_runtime() -> BotRuntime:
     openai_ready = bool((os.environ.get("OPENAI_API_KEY") or "").strip())
-    config = load_config(require_line_credentials=False, require_openai=openai_ready)
+    config = load_config(require_discord_credentials=False, require_openai=openai_ready)
     return BotRuntime(config=config, brain=AIResponder(config))
 
 
@@ -880,6 +909,7 @@ def create_bot(runtime: BotRuntime | None = None) -> discord.Client:
                     channel=message.channel,
                     tool_notice_display_override=channel_settings.get("tool_notice_display", "abbrev"),
                 )
+                _remember_response_channel(message.channel.id)
         except Exception:
             logger.exception("AI reply generation or Discord send failed")
             await message.channel.send(MSG_SYSTEM_FAILURE)

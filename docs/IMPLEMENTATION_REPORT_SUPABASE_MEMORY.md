@@ -1,6 +1,6 @@
-# DKIS-LL: Supabase 移行・記憶機能 — 実装レポート
+# DKIS-DISC: Supabase 移行・記憶機能 — 実装レポート
 
-本書は、Render.com 等の **ステートレス** 環境で動作する **DKIS-LL（LINE ボット）** に、**Supabase（PostgreSQL）** を外部ストアとして接続し、本家 DKIS の **`dist/memory/*.txt` 相当**のファイル記憶と **`user_settings` 相当**のランタイム設定を実装した内容をまとめたものです。
+本書は、Render.com 等の **ステートレス** 環境で動作する **DKIS-DISC（Discord ボット）** に、**Supabase（PostgreSQL）** を外部ストアとして接続し、本家 DKIS の **`dist/memory/*.txt` 相当**のファイル記憶と **`user_settings` 相当**のランタイム設定を実装した内容をまとめたものです。
 
 ---
 
@@ -10,7 +10,7 @@
 |------|------|
 | 目的 | サーバー再起動・複数ワーカーでも **記憶・設定が残る** ようにする |
 | 再現対象 | テキスト「ファイル」の一覧・読み・書き・追記；会話ログの書き出し；モデル名など少数設定 |
-| 非対象 | LINE でユーザーがファイル添付する処理（別機能）；記憶ファイルの **削除 API／CMD**（今回未実装） |
+| 非対象 | Discord でユーザーがファイル添付する処理（別機能）；記憶ファイルの **削除 API／CMD**（今回未実装） |
 
 ---
 
@@ -73,7 +73,7 @@
 | `setting_key` | 意味 | 既定の扱い |
 |---------------|------|------------|
 | `current_model` | OpenAI の **チャットモデル ID** | 空なら `dist/settings.json` の `ai_models.main` |
-| `show_ri_text` | **`[RT#n]コマンド:…`** を LINE に送るか | `true`（`false`/`off`/`no`/`0` で非表示） |
+| `show_ri_text` | **`[RT#n]コマンド:…`** を Discord に送るか | `true`（`false`/`off`/`no`/`0` で非表示） |
 | `text.use_raw_result` | **READ-TEXT** で要約せず全文を RI に載せるか | `false`（true 系なら全文） |
 
 **適用タイミング**
@@ -108,7 +108,7 @@ DKIS 形式どおり、**`retry: true` は AI 応答の `[ARGS-2]`** に依存�
 
 - **ARGS**: `filename` 必須、任意 `description`。
 - **処理**: **ユーザー別インメモリバッファ**の全文を `memory_files.content` に書き込み、当該ユーザーのバッファを **クリア**。
-- **バッファ内容**（`engine.LineBrain`）:
+- **バッファ内容**（`engine.DiscordBrain`）:
   - 各 `reply` で **`USER`** 行（マスター入力テキスト）
   - 各 GPT 完了ごとに **`ASSISTANT_RAW`**（当該ターンの生 `[CMD]` ブロック含む応答）
   - RETRY のたびに assistant_raw が複数回溜まる場合あり
@@ -173,7 +173,7 @@ DKIS 形式どおり、**`retry: true` は AI 応答の `[ARGS-2]`** に依存�
 ## 12. 既知の限界・将来拡張
 
 - **DELETE-FILE**／DB行削除コマンドは未実装。
-- **ユーザー別 `memory_files`**: `line_user_id`（LINE `user_id`）と `filename` の複合キーで分離。
+- **ユーザー別 `memory_files`**: 互換列 `line_user_id` に Discord `user_id` を格納し、`filename` との複合キーで分離。
 - **`user_settings` はボット全体共通**: `setting_key` ごとに 1 値のみ（全ユーザーで共有）。
 - **Rate limit・バックオフ**は SDK 任せ。大量 LIST でのコストは運用側で調整。
 

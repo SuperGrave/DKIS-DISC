@@ -112,7 +112,7 @@ def _emit_chunks(on_line_message: Callable[[str], None] | None, part: str, *, ou
         on_line_message(chunk)
 
 
-class LineBrain:
+class DiscordBrain:
     def __init__(self, config: AppConfig):
         self._config = config
         self._client = OpenAI(api_key=config.openai_api_key)
@@ -428,3 +428,7 @@ class LineBrain:
 
         record_discord_user_usage(uid, tokens=total_tokens_used)
         return out_parts
+
+
+# 旧 import 名の互換。実体は Discord 向けの応答エンジン。
+LineBrain = DiscordBrain

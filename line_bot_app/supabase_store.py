@@ -1,6 +1,6 @@
 """Supabase: user_settings（全ユーザー共通）、memory_files（Discord user_id 別）、known_line_users（中期記憶・起動通知オプトイン等）。
 
-DB の既存テーブル名・列名は LINE 版からの互換名を維持する。
+DB の既存テーブル名・列名には旧実装由来の line_user_id が残るが、格納値は Discord user_id。
 """
 
 from __future__ import annotations
@@ -12,16 +12,18 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-MAX_LINE_USER_ID_LEN = 128
+MAX_DISCORD_USER_ID_LEN = 128
+# 旧 import 名の互換。
+MAX_LINE_USER_ID_LEN = MAX_DISCORD_USER_ID_LEN
 
 
 def normalize_memory_user_id(uid: str | None) -> str:
-    """LIST/READ/WRITE 系で memory_files.line_user_id に格納する値。"""
+    """LIST/READ/WRITE 系で memory_files.line_user_id（互換列）に格納する Discord user_id。"""
     u = (uid or "").strip()
     if not u:
         return "anonymous"
-    if len(u) > MAX_LINE_USER_ID_LEN:
-        u = u[:MAX_LINE_USER_ID_LEN]
+    if len(u) > MAX_DISCORD_USER_ID_LEN:
+        u = u[:MAX_DISCORD_USER_ID_LEN]
     return u
 
 
@@ -118,7 +120,7 @@ def get_db_setting(key: str, default: str = "") -> str:
 
 
 def set_db_setting(key: str, value: str) -> tuple[bool, str]:
-    """user_settings に保存。変更はボット全体（すべての LINE ユーザー）に反映されます。"""
+    """user_settings に保存。変更はボット全体（すべての Discord ユーザー）に反映されます。"""
     k = (key or "").strip()
     if not k:
         return False, "setting_key が空です。"
@@ -527,7 +529,7 @@ def _now_iso() -> str:
 
 
 def remember_line_user_for_push(uid: str | None) -> None:
-    """互換名。Discord 入口では remember_discord_user_for_push を使う。"""
+    """旧入口向け互換名。Discord 入口では remember_discord_user_for_push を使う。"""
     remember_discord_user_for_push(uid)
 
 
@@ -592,7 +594,7 @@ def list_boot_notification_recipient_ids() -> list[str]:
 
 
 def get_notify_worker_restart(uid: str | None) -> bool:
-    """この LINE userId がワーカー起動 Push を受け取るか（known_line_users.notify_on_restart）。"""
+    """この Discord user_id がワーカー起動通知を受け取るか（known_line_users.notify_on_restart）。"""
     u = normalize_memory_user_id(uid)
     if u == "anonymous":
         return False

@@ -1,8 +1,8 @@
--- DKIS-LL: Supabase 記憶・設定テーブル
+-- DKIS-DISC: Supabase 記憶・設定テーブル
 -- Supabase Dashboard → SQL Editor で実行してください。
 -- アプリは通常 SUPABASE_KEY に service_role（サーバー秘密鍵）を設定します。
 --
--- 記憶 memory_files: LINE の user_id（line_user_id）ごとにファイルを分離
+-- 記憶 memory_files: Discord の user_id を互換列 line_user_id に格納してファイルを分離
 -- 設定 user_settings: setting_key ごとに 1 値のみ（全ユーザー共通）
 
 CREATE TABLE IF NOT EXISTS memory_files (
@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS channel_settings (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- LINE が過去ユーザーを一覧しないので、Webhook で見えた userId を記録。
+-- Discord API だけでは過去に会話した全ユーザーを一覧できないため、観測した user_id を記録。
 -- notify_on_restart が true のユーザーだけ、ワーカー起動時の定型 Push の宛先になる（オプトイン）。
 CREATE TABLE IF NOT EXISTS known_line_users (
     line_user_id TEXT PRIMARY KEY,

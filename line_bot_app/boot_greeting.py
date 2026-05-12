@@ -241,6 +241,6 @@ def maybe_send_worker_boot_greetings(
     *,
     restart_push_enabled: bool = True,
 ) -> None:
-    """旧 LINE 入口向けの互換スタブ。Discord 版では `maybe_build_worker_boot_greeting` を使う。"""
+    """旧入口向けの互換スタブ。Discord 版では `maybe_build_worker_boot_greeting` を使う。"""
     _ = configuration
     maybe_build_worker_boot_greeting(logger, restart_push_enabled=restart_push_enabled)

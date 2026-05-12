@@ -27,7 +27,7 @@ def _clamp_web_tool_text(text: str, *, limit: int = _WEB_TOOL_TEXT_MAX) -> str:
 
 @dataclass
 class ExportHooks:
-    """LineBrain が会話エクスポート用バッファへ追記・取出しするフック（SAVE-LOG 廃止後は内部ログ用途）。"""
+    """DiscordBrain が会話エクスポート用バッファへ追記・取出しするフック（SAVE-LOG 廃止後は内部ログ用途）。"""
 
     append_log: Callable[[str, str, str], None]
     take_clear_log: Callable[[str], str]

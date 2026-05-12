@@ -27,11 +27,16 @@ _OPENAI_PLACEHOLDER = "unused-openai-not-configured"
 
 
 def load_config(
-    *, require_line_credentials: bool = True, require_openai: bool = True
+    *,
+    require_discord_credentials: bool = True,
+    require_openai: bool = True,
+    require_line_credentials: bool | None = None,
 ) -> AppConfig:
     """Discord 起動時は OpenAI の必須変数をチェックする。開発コンソールだけ試すときは False にできる。
     Render 初回デプロイで ENV が空のときは require_* を False にしプレースホルダで起動できる。"""
-    _ = require_line_credentials
+    if require_line_credentials is not None:
+        require_discord_credentials = require_line_credentials
+    _ = require_discord_credentials
     missing: list[str] = []
     if require_openai:
         missing.extend(

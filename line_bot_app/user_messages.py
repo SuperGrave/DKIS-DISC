@@ -6,7 +6,7 @@ MSG_SYSTEM_FAILURE = (
     "システムの管理人に連絡してください。"
 )
 
-# LINE に載せる文が空になったとき（想定外）
+# Discord に送る文が空になったとき（想定外）
 MSG_EMPTY_REPLY = MSG_SYSTEM_FAILURE
 
 # モデルがツール結果から本文を組み立てられなかったとき
