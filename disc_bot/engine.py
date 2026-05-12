@@ -11,12 +11,14 @@ from .boot_greeting import take_worker_boot_push_for_history
 from .commands import COMMAND_HANDLERS, CommandServices, ExportHooks
 from .config import AppConfig
 from .input_build import build_input_segments
-from .line_messages import split_line_text
+from .discord_messages import split_line_text
 from .parsing import format_model_response_block, parse_ai_response
 from .supabase_store import (
     get_discord_user_settings,
     get_mid_term_note,
+    load_conversation_history,
     record_discord_user_usage,
+    save_conversation_history,
     talking_memory_turns,
     user_model_from_choice,
 )
@@ -188,14 +190,20 @@ class DiscordBrain:
         hist = self._histories[key]
         content = self._build_system_prompt_for_user(user_id or "anonymous")
         if not hist:
+            restored = load_conversation_history(key)
             hist.append({"role": "system", "content": content})
+            hist.extend(restored)
         else:
             hist[0] = {"role": "system", "content": content}
         return hist
 
     def _trim(self, messages: list[dict], *, max_turns: int | None = None) -> None:
+        # ユーザー設定が最優先。未指定のときだけ config の上限を使う。
         if max_turns is None:
             max_turns = max(1, self._config.max_history_turns)
+        else:
+            # ユーザー設定はそのまま使う（config を上書きしない）
+            pass
         if max_turns <= 0:
             del messages[1:]
             return
@@ -297,6 +305,7 @@ class DiscordBrain:
             self._trim(messages, max_turns=max_history_turns)
             _emit_chunks(on_line_message, ai_raw, out_parts=raw_parts)
             record_discord_user_usage(uid, tokens=total_tokens_used)
+            save_conversation_history(uid, messages)
             return raw_parts
         parsed = parse_ai_response(ai_raw)
         parse_ok = bool(parsed.pop("__dkis_parse_ok__", False))
@@ -427,6 +436,7 @@ class DiscordBrain:
             return [fallback]
 
         record_discord_user_usage(uid, tokens=total_tokens_used)
+        save_conversation_history(uid, messages)
         return out_parts
 
 

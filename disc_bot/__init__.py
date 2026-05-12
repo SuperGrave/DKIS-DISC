@@ -1,5 +1,5 @@
 """パッケージ直下では Discord bot 本体を即時 import しない。
-`from line_bot_app.ai import ...` など軽いモジュールだけ使う経路を軽くする。"""
+`from disc_bot.engine import ...` など軽いモジュールだけ使う経路を軽くする。"""
 
 from __future__ import annotations
 

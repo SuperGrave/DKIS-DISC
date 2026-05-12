@@ -10,8 +10,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from line_bot_app.ai import AIResponder
-from line_bot_app.config import load_config
+from disc_bot.engine import DiscordBrain as AIResponder
+from disc_bot.config import load_config
 
 # Discord 上の user_id に相当（履歴はこの ID で区切られる）
 _CONSOLE_USER_ID = "console-dev"

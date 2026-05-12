@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from .settings_loader import InputFormatMain
 
 
-def _jst_now_str() -> str:
-    jst = timezone(timedelta(hours=9))
-    return datetime.now(jst).strftime("%Y/%m/%d %H:%M")
+def _utc_now_str() -> str:
+    return datetime.now(timezone.utc).strftime("%Y/%m/%d %H:%M UTC")
 
 
 _DEFAULT_LABELS = {
@@ -33,7 +32,7 @@ def build_input_segments(
         dict with keys: text, segments, timestamp, raw_text
     """
     fmt = input_main
-    timestamp = _jst_now_str()
+    timestamp = _utc_now_str()
     lp = last_proc_result.strip() if last_proc_result else "（前回処理なし）"
     labels = {**_DEFAULT_LABELS, **(fmt.labels if fmt else {})}
 

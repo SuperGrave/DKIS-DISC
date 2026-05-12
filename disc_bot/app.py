@@ -1,7 +1,4 @@
-"""旧 Flask Webhook 入口の互換モジュール。
-
-Discord 版では `main.create_bot` が実行入口です。
-"""
+"""後方互換エントリ。実行入口は main.py の create_bot。"""
 
 from __future__ import annotations
 

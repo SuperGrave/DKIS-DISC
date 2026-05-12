@@ -1,11 +1,10 @@
 [project]
 name = "dkis-disc"
-version = "1.2.4"
+version = "1.3.0"
 description = "DKIS-DISC — Discord上で動作するDKIS互換の軽量AIボット（discord.py + OpenAI + ツール連携）。Web UI・音声・メディア再生なし。"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "cryptography>=48.0.0",
     # Discord bot
     "discord.py>=2.6.0",
     # AI / API クライアント

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\super\\\\Desktop\\\\DKISシリーズパッケージ\\(開発中\\)\\\\DKIS-DISC\\\\.claude\\\\worktrees\\\\hardcore-mendeleev-64a643\" -Recurse -Force)",
+      "Bash(Select-Object FullName)",
+      "Bash(ConvertTo-Json)",
+      "Bash(Out-String)",
+      "Bash(git mv *)"
+    ]
+  }
+}

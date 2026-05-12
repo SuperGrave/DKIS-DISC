@@ -295,7 +295,7 @@ def build_settings_text(config: AppConfig, user_id: str | None, channel_id: str 
         "",
         f"きりたんとの会話回数:{stats['conversation_count']}回",
         "",
-        f"個人用中期記憶文字数:{stats['mid_term_note_chars']}文字(max{200}文字)",
+        f"個人用中期記憶文字数:{stats['mid_term_note_chars']}文字(max{500}文字)",
         "",
         f"本日の消費トークン数:{stats['daily_token_count']}トークン",
     ]
@@ -329,7 +329,7 @@ def set_setting_value(config: AppConfig, key: str, val: str, user_id: str | None
             return False, err or "不明なエラー"
         line = (
             f"notify_worker_restart を {'オン' if enabled else 'オフ'} にしました。\n"
-            "※この Discord アカウントだけに適用されます（known_line_users）。"
+            "※この Discord アカウントだけに適用されます（discord_users）。"
         )
         if not config.restart_push_enabled:
             line += (

@@ -7,6 +7,7 @@ import os
 import sys
 import threading
 import time
+import traceback
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -15,17 +16,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import discord
+from discord import app_commands
 from dotenv import load_dotenv
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-from line_bot_app.ai import AIResponder
-from line_bot_app.boot_greeting import maybe_build_worker_boot_greeting
-from line_bot_app.config import load_config
-from line_bot_app.config import AppConfig
-from line_bot_app.commands_memory import build_settings_text, set_setting_value
-from line_bot_app.line_messages import split_line_text
-from line_bot_app.supabase_store import (
+from disc_bot.engine import DiscordBrain
+from disc_bot.boot_greeting import maybe_build_worker_boot_greeting
+from disc_bot.config import load_config
+from disc_bot.config import AppConfig
+from disc_bot.commands_memory import build_settings_text, set_setting_value
+from disc_bot.discord_messages import split_line_text
+from disc_bot.supabase_store import (
     daily_token_limit_for_role,
     get_discord_user_stats,
     get_discord_user_settings,
@@ -37,16 +37,14 @@ from line_bot_app.supabase_store import (
     set_channel_setting,
     user_role_from_value,
 )
-from line_bot_app.user_messages import MSG_SYSTEM_FAILURE
+from disc_bot.user_messages import MSG_SYSTEM_FAILURE
 
 logger = logging.getLogger("dkis_disc")
-DISCORD_HTTP_USER_AGENT = "DKIS-DISC (https://github.com/SuperGrave/DKIS-DISC, 1.2.4)"
 DISCORD_ADMINISTRATOR_PERMISSION = 0x8
 RECENT_RESPONSE_WINDOW_SECONDS = 10 * 60
 USER_SETTING_KEYS = frozenset(
     {"talk_with_kiritan", "talking_memory", "using_model", "personal_memory", "response_criteria", "process_notice"}
 )
-ADMIN_SETTING_KEYS = frozenset()
 CHANNEL_SETTING_KEYS = frozenset({"enabled", "channel_kind"})
 _recent_response_channels: dict[int, float] = {}
 
@@ -54,7 +52,7 @@ _recent_response_channels: dict[int, float] = {}
 @dataclass(frozen=True)
 class BotRuntime:
     config: AppConfig
-    brain: AIResponder
+    brain: DiscordBrain
     reply_lock: object = field(default_factory=threading.RLock)
 
 
@@ -175,7 +173,6 @@ def _message_targets_bot(
 
 
 def restart_process() -> None:
-    """現在の Python プロセスを同じ引数で置き換える。"""
     python = sys.executable
     os.execv(python, [python, *sys.argv])
 
@@ -193,7 +190,6 @@ async def _reply_with_streaming(
     channel: discord.abc.Messageable,
     tool_notice_display_override: str | None = None,
 ) -> None:
-    """AIが確定した応答パートをDiscordへ逐次送信する。"""
     loop = asyncio.get_running_loop()
 
     def on_line_message(chunk: str) -> None:
@@ -209,9 +205,7 @@ async def _reply_with_streaming(
                 tool_notice_display_override=tool_notice_display_override,
             )
 
-    await asyncio.to_thread(
-        reply,
-    )
+    await asyncio.to_thread(reply)
 
 
 def _read_int_file(path: str) -> int | None:
@@ -325,66 +319,7 @@ async def _presence_loop(client: discord.Client) -> None:
 def _build_runtime() -> BotRuntime:
     openai_ready = bool((os.environ.get("OPENAI_API_KEY") or "").strip())
     config = load_config(require_discord_credentials=False, require_openai=openai_ready)
-    return BotRuntime(config=config, brain=AIResponder(config))
-
-
-def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> None:
-    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    handler.send_response(status)
-    handler.send_header("Content-Type", "application/json; charset=utf-8")
-    handler.send_header("Content-Length", str(len(body)))
-    handler.end_headers()
-    handler.wfile.write(body)
-
-
-def _verify_discord_interaction(body: bytes, headers) -> bool:
-    public_key_hex = (os.environ.get("DISCORD_PUBLIC_KEY") or "").strip()
-    if not public_key_hex:
-        logger.warning("DISCORD_PUBLIC_KEY is not set; interaction endpoint is disabled")
-        return False
-    signature = (headers.get("X-Signature-Ed25519") or "").strip()
-    timestamp = (headers.get("X-Signature-Timestamp") or "").strip()
-    if not signature or not timestamp:
-        return False
-    try:
-        public_key = Ed25519PublicKey.from_public_bytes(bytes.fromhex(public_key_hex))
-        public_key.verify(bytes.fromhex(signature), timestamp.encode("utf-8") + body)
-        return True
-    except (ValueError, InvalidSignature):
-        return False
-
-
-def _interaction_options(data: dict) -> dict[str, str]:
-    return {str(option.get("name") or ""): str(option.get("value") or "") for option in data.get("options") or []}
-
-
-def _interaction_user_id(payload: dict) -> str:
-    member = payload.get("member") or {}
-    user = member.get("user") or payload.get("user") or {}
-    raw = str(user.get("id") or "").strip()
-    return _discord_user_key(int(raw)) if raw.isdigit() else "discord:interaction"
-
-
-def _interaction_raw_user_id(payload: dict) -> str:
-    member = payload.get("member") or {}
-    user = member.get("user") or payload.get("user") or {}
-    return str(user.get("id") or "").strip()
-
-
-def _interaction_channel_id(payload: dict) -> str:
-    return str(payload.get("channel_id") or "").strip()
-
-
-def _interaction_is_admin(payload: dict) -> bool:
-    raw_id = _interaction_raw_user_id(payload)
-    if raw_id and raw_id in _admin_user_ids():
-        return True
-    raw_permissions = str((payload.get("member") or {}).get("permissions") or "0")
-    try:
-        permissions = int(raw_permissions)
-    except ValueError:
-        permissions = 0
-    return bool(permissions & DISCORD_ADMINISTRATOR_PERMISSION)
+    return BotRuntime(config=config, brain=DiscordBrain(config))
 
 
 def _raw_discord_id_from_user_key(user_id: str | None) -> str:
@@ -404,22 +339,25 @@ def _is_operator_user(user_id: str | None) -> bool:
     return _user_role(user_id) == "operator"
 
 
-def _interaction_is_operator(payload: dict, uid: str | None = None) -> bool:
-    raw_id = _interaction_raw_user_id(payload)
-    if raw_id and raw_id in _operator_user_ids():
+def _is_interaction_admin(interaction: discord.Interaction) -> bool:
+    raw_id = str(interaction.user.id)
+    if raw_id in _admin_user_ids():
         return True
-    return _is_operator_user(uid or _interaction_user_id(payload))
+    if isinstance(interaction.user, discord.Member):
+        return bool(interaction.user.guild_permissions.administrator)
+    return False
 
 
-def _discord_json_headers(*, token: str | None = None) -> dict[str, str]:
-    headers = {
-        "Content-Type": "application/json; charset=utf-8",
-        "Accept": "application/json",
-        "User-Agent": DISCORD_HTTP_USER_AGENT,
-    }
-    if token:
-        headers["Authorization"] = f"Bot {token}"
-    return headers
+def _is_interaction_operator(interaction: discord.Interaction) -> bool:
+    raw_id = str(interaction.user.id)
+    if raw_id in _operator_user_ids():
+        return True
+    uid = _discord_user_key(interaction.user.id)
+    return _is_operator_user(uid)
+
+
+def _format_settings_text(config: AppConfig, user_id: str | None, channel_id: str) -> str:
+    return build_settings_text(config, user_id, channel_id)
 
 
 def _discord_command_guild_ids() -> list[str]:
@@ -448,175 +386,39 @@ def _discord_command_registration_scope() -> str:
     return "global"
 
 
-def _setting_requires_admin(key: str) -> bool:
-    return key in ADMIN_SETTING_KEYS
+async def _sync_app_commands(tree: app_commands.CommandTree) -> None:
+    scope = _discord_command_registration_scope()
+    guild_ids = _discord_command_guild_ids()
+    if scope in ("guild", "both") and guild_ids:
+        for gid in guild_ids:
+            try:
+                synced = await tree.sync(guild=discord.Object(id=int(gid)))
+                logger.info("App commands synced to guild %s: %d command(s)", gid, len(synced))
+            except Exception:
+                logger.exception("App command sync failed for guild %s", gid)
+    if scope in ("global", "both"):
+        try:
+            synced = await tree.sync()
+            logger.info("App commands synced globally: %d command(s)", len(synced))
+        except Exception:
+            logger.exception("Global app command sync failed")
 
 
-def _format_setting_permission_error(key: str) -> str:
-    return (
-        f"`{key}` はボット全体に影響する設定なので、Discord管理者または "
-        "`DISCORD_ADMIN_USER_IDS` に登録されたユーザーだけ変更できます。"
-    )
+def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> None:
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    handler.send_response(status)
+    handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
 
 
-def _channel_setting_key_choices() -> list[dict]:
-    return [{"name": "利用ON/OFF", "value": "enabled"}]
-
-
-def _channel_setting_value_choices() -> list[dict]:
-    return [
-        {"name": "true（有効）", "value": "true"},
-        {"name": "false（無効）", "value": "false"},
-        {"name": "debug（デバッグルーム化/operator）", "value": "debug"},
-        {"name": "normal（通常チャンネルへ戻す/operator）", "value": "normal"},
-    ]
-
-
-def _resolve_interaction_channel_option(payload: dict, options: dict[str, str]) -> str:
-    return (options.get("channel") or _interaction_channel_id(payload)).strip()
-
-
-def _format_channel_settings_text(channel_id: str) -> str:
-    settings = get_channel_settings(channel_id)
-    return (
-        f"channel_id: {channel_id or '(unknown)'}\n"
-        f"enabled: {settings.get('enabled', 'off')}\n"
-        f"process_notice: {settings.get('process_notice', '2')}\n"
-        f"channel_kind: {settings.get('channel_kind', 'normal')}"
-    )
-
-
-def _format_settings_text(config: AppConfig, user_id: str | None, channel_id: str) -> str:
-    return build_settings_text(config, user_id, channel_id)
-
-
-def _is_channel_enable_command(command: str, options: dict[str, str]) -> bool:
-    value = (options.get("value") or "").strip().lower()
-    return command == "channel_setting" and value in {
-        "true",
-        "1",
-        "yes",
-        "debug",
-        "normal",
-    }
-
-
-def _channel_disabled_response(channel_id: str) -> dict:
-    return _interaction_message_response(
-        "このチャンネルはDKIS-DISCの利用設定が無効です。\n"
-        f"管理者が `/channel_setting value:true` をこのチャンネルで実行すると有効に戻せます。channel_id={channel_id}"
-    )
-
-
-def _interaction_message_response(content: str, *, ephemeral: bool = True) -> dict:
-    chunks = split_line_text(content, max_chunks=1)
-    data: dict = {
-        "content": chunks[0] if chunks else MSG_SYSTEM_FAILURE,
-        "allowed_mentions": {"parse": []},
-    }
-    if ephemeral:
-        data["flags"] = 64
-    return {"type": 4, "data": data}
-
-
-def _build_interaction_command_response(runtime: BotRuntime, payload: dict) -> dict:
-    data = payload.get("data") or {}
-    command = str(data.get("name") or "").lower()
-    options = _interaction_options(data)
-    uid = _interaction_user_id(payload)
-
-    try:
-        if command == "get_setting":
-            return _interaction_message_response(
-                _format_settings_text(runtime.config, uid, _interaction_channel_id(payload))
-            )
-
-        if command == "set_setting":
-            key = (options.get("key") or "").strip()
-            value = options.get("value") or ""
-            role = _user_role(uid)
-            if role == "visitor" and key == "using_model":
-                return _interaction_message_response("visitor は using_model を変更できません。member 以上が必要です。")
-            if _setting_requires_admin(key) and not _interaction_is_admin(payload):
-                return _interaction_message_response(_format_setting_permission_error(key))
-            ok, line = set_setting_value(runtime.config, key, value, uid, _interaction_channel_id(payload))
-            return _interaction_message_response(line)
-
-        if command == "channel_setting":
-            channel_value = (options.get("value") or "").strip().lower()
-            if channel_value in {"debug", "normal"}:
-                if not _interaction_is_operator(payload, uid):
-                    return _interaction_message_response(
-                        "デバッグルーム設定は operator または `DISCORD_OPERATOR_USER_IDS` のユーザーだけ変更できます。"
-                    )
-                channel_id = _interaction_channel_id(payload)
-                kind = "debug" if channel_value == "debug" else "normal"
-                ok, line = set_channel_setting(channel_id, "channel_kind", kind)
-                if ok and kind == "debug":
-                    line += "\nこのチャンネルはデバッグルームです。通常会話は無効で、専用コマンドは後続実装で追加されます。"
-                return _interaction_message_response(line)
-            if not _interaction_is_admin(payload):
-                return _interaction_message_response(
-                    "チャンネル設定はDiscord管理者または `DISCORD_ADMIN_USER_IDS` のユーザーだけ変更できます。"
-                )
-            channel_id = _interaction_channel_id(payload)
-            value = (options.get("value") or "").strip()
-            ok, line = set_channel_setting(channel_id, "enabled", value)
-            return _interaction_message_response(line)
-
-        return _interaction_message_response("未対応のコマンドです。")
-    except Exception:
-        logger.exception("Discord interaction command failed")
-        return _interaction_message_response(MSG_SYSTEM_FAILURE)
-
-
-def _handle_discord_interaction(runtime: BotRuntime, payload: dict) -> dict:
-    interaction_type = payload.get("type")
-    if interaction_type == 1:
-        return {"type": 1}
-
-    if interaction_type != 2:
-        return _interaction_message_response("未対応のInteractionです。")
-
-    data = payload.get("data") or {}
-    name = str(data.get("name") or "").lower()
-    if name not in {"get_setting", "set_setting", "channel_setting"}:
-        return _interaction_message_response("未対応のコマンドです。")
-    options = _interaction_options(data)
-    channel_id = _resolve_interaction_channel_option(payload, options)
-    channel_settings = get_channel_settings(channel_id)
-    if channel_settings.get("channel_kind", "normal") == "debug":
-        return _build_interaction_command_response(runtime, payload)
-    if channel_settings.get("enabled", "off") != "on" and not _is_channel_enable_command(name, options):
-        return _channel_disabled_response(channel_id)
-
-    return _build_interaction_command_response(runtime, payload)
-
-
-def _start_health_server(runtime: BotRuntime) -> None:
+def _start_health_server() -> None:
     port = int(os.environ.get("PORT", "5000"))
 
     class HealthHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
             _json_response(self, 200, {"ok": True, "service": "dkis-disc-bot"})
-
-        def do_POST(self) -> None:  # noqa: N802
-            if self.path.rstrip("/") != "/interactions":
-                _json_response(self, 404, {"ok": False, "error": "not_found"})
-                return
-
-            length = int(self.headers.get("Content-Length") or "0")
-            body = self.rfile.read(length)
-            if not _verify_discord_interaction(body, self.headers):
-                _json_response(self, 401, {"ok": False, "error": "invalid_signature"})
-                return
-            try:
-                payload = json.loads(body.decode("utf-8"))
-            except json.JSONDecodeError:
-                _json_response(self, 400, {"ok": False, "error": "invalid_json"})
-                return
-
-            _json_response(self, 200, _handle_discord_interaction(runtime, payload))
 
         def log_message(self, format: str, *args: object) -> None:
             logger.debug("health server: " + format, *args)
@@ -656,124 +458,6 @@ def _start_self_ping() -> None:
     threading.Thread(target=ping_loop, name="keepalive-ping", daemon=True).start()
 
 
-def _setting_key_choices() -> list[dict]:
-    return [
-        {"name": "talk with kiritan（きりたんとの会話設定）", "value": "talk_with_kiritan"},
-        {"name": "talking memory（会話履歴の保持）", "value": "talking_memory"},
-        {"name": "using model（使用するモデル）", "value": "using_model"},
-        {"name": "personal memory（個人用中期記憶）", "value": "personal_memory"},
-        {"name": "response criteria（botの応答モード）", "value": "response_criteria"},
-        {"name": "process notice（処理内容の付加表示）", "value": "process_notice"},
-    ]
-
-
-def _setting_value_choices() -> list[dict]:
-    return [
-        {"name": "true", "value": "true"},
-        {"name": "false", "value": "false"},
-        {"name": "1", "value": "1"},
-        {"name": "2", "value": "2"},
-        {"name": "3", "value": "3"},
-        {"name": "4", "value": "4"},
-        {"name": "5", "value": "5"},
-    ]
-
-
-def _discord_command_definitions(config: AppConfig) -> list[dict]:
-    return [
-        {
-            "name": "get_setting",
-            "description": "DKIS-DISCの現在設定を表示します。",
-            "type": 1,
-        },
-        {
-            "name": "set_setting",
-            "description": "DKIS-DISCの設定を変更します。",
-            "type": 1,
-            "options": [
-                {
-                    "type": 3,
-                    "name": "key",
-                    "description": "変更する設定キー",
-                    "required": True,
-                    "choices": _setting_key_choices(),
-                },
-                {
-                    "type": 3,
-                    "name": "value",
-                    "description": "保存する値（true/false/1/2/3/4/5）",
-                    "required": True,
-                    "choices": _setting_value_choices(),
-                },
-            ],
-        },
-        {
-            "name": "channel_setting",
-            "description": "このチャンネルで bot の有効/無効を設定します（operator は debug/normal も可）。",
-            "type": 1,
-            "options": [
-                {
-                    "type": 3,
-                    "name": "value",
-                    "description": "true/false/debug/normal",
-                    "required": True,
-                    "choices": _channel_setting_value_choices(),
-                },
-            ],
-        },
-    ]
-
-
-def _register_discord_commands(config: AppConfig) -> None:
-    if not _env_flag("DISCORD_AUTO_REGISTER_COMMANDS", True):
-        return
-    application_id = (os.environ.get("DISCORD_APPLICATION_ID") or "").strip()
-    token = (os.environ.get("DISCORD_BOT_TOKEN") or "").strip()
-    if not application_id or not token:
-        logger.info("Discord command registration skipped; DISCORD_APPLICATION_ID or token is not set")
-        return
-
-    commands_data = json.dumps(_discord_command_definitions(config), ensure_ascii=False).encode("utf-8")
-    empty_data = b"[]"
-    global_url = f"https://discord.com/api/v10/applications/{application_id}/commands"
-    guild_urls = [
-        (
-            f"guild:{guild_id}",
-            f"https://discord.com/api/v10/applications/{application_id}/guilds/{guild_id}/commands",
-        )
-        for guild_id in _discord_command_guild_ids()
-    ]
-    scope = _discord_command_registration_scope()
-    requests: list[tuple[str, str, bytes]] = []
-    if scope in {"global", "both"}:
-        requests.append(("global", global_url, commands_data))
-    if scope in {"guild", "both"}:
-        if guild_urls:
-            requests.extend((label, url, commands_data) for label, url in guild_urls)
-        else:
-            logger.warning("DISCORD_COMMAND_REGISTRATION_SCOPE=%s but DISCORD_GUILD_ID(S) is not set", scope)
-    if scope == "global":
-        requests.extend((f"{label}:clear", url, empty_data) for label, url in guild_urls)
-    elif scope == "guild" and guild_urls:
-        requests.append(("global:clear", global_url, empty_data))
-
-    for label, url, payload in requests:
-        request = urllib.request.Request(
-            url,
-            data=payload,
-            headers=_discord_json_headers(token=token),
-            method="PUT",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                logger.info("Discord command bulk registration (%s): HTTP %s", label, response.status)
-        except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")
-            logger.error("Discord command registration failed (%s): HTTP %s %s", label, exc.code, body)
-        except Exception:
-            logger.exception("Discord command registration failed (%s)", label)
-
-
 def _build_boot_status_text(client: discord.Client, greeting: str | None) -> str:
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     enabled_channel_count, channel_count = _connected_channel_counts(client)
@@ -792,10 +476,14 @@ def _build_boot_status_text(client: discord.Client, greeting: str | None) -> str
     return "\n".join(lines)
 
 
-async def _send_boot_status_to_debug_rooms(client: discord.Client, text: str, fallback_channel_id: int) -> None:
+async def _send_to_debug_rooms(
+    client: discord.Client,
+    text: str,
+    fallback_channel_id: int | None,
+) -> None:
     raw_debug_ids = list_debug_channel_ids()
     target_ids = [int(x) for x in raw_debug_ids if str(x).isdigit()]
-    if not target_ids:
+    if not target_ids and fallback_channel_id:
         target_ids = [fallback_channel_id]
     seen: set[int] = set()
     for channel_id in target_ids:
@@ -805,15 +493,28 @@ async def _send_boot_status_to_debug_rooms(client: discord.Client, text: str, fa
         try:
             channel = client.get_channel(channel_id) or await client.fetch_channel(channel_id)
         except discord.Forbidden:
-            logger.exception("Boot status channel is not accessible: %s", channel_id)
+            logger.exception("Debug channel is not accessible: %s", channel_id)
             continue
         except Exception:
-            logger.exception("Boot status channel fetch failed: %s", channel_id)
+            logger.exception("Debug channel fetch failed: %s", channel_id)
             continue
         if not isinstance(channel, discord.abc.Messageable):
-            logger.error("Boot status channel is not messageable: %s", channel_id)
+            logger.error("Debug channel is not messageable: %s", channel_id)
             continue
         await _send_discord_chunks(channel, text)
+
+
+async def _send_error_to_debug_rooms(
+    client: discord.Client,
+    title: str,
+    detail: str,
+    fallback_channel_id: int | None = None,
+) -> None:
+    """エラー詳細をデバッグルームへ通知する。"""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    tb_clipped = detail[:1800] if len(detail) > 1800 else detail
+    text = f"[エラー通知] {now}\n{title}\n```\n{tb_clipped}\n```"
+    await _send_to_debug_rooms(client, text, fallback_channel_id)
 
 
 def create_bot(runtime: BotRuntime | None = None) -> discord.Client:
@@ -829,8 +530,112 @@ def create_bot(runtime: BotRuntime | None = None) -> discord.Client:
     intents = discord.Intents.default()
     intents.message_content = message_mode != "slash_only"
     client = discord.Client(intents=intents)
+    tree = app_commands.CommandTree(client)
     boot_greeting_sent = False
     presence_task: asyncio.Task | None = None
+
+    # -------------------------------------------------------
+    # スラッシュコマンド定義
+    # -------------------------------------------------------
+
+    @tree.command(name="get_setting", description="DKIS-DISCの現在設定を表示します。")
+    async def slash_get_setting(interaction: discord.Interaction) -> None:
+        channel_id = str(interaction.channel_id or "")
+        channel_settings = get_channel_settings(channel_id)
+        if channel_settings.get("channel_kind", "normal") != "debug" and channel_settings.get("enabled", "off") != "on":
+            await interaction.response.send_message(
+                f"このチャンネルはDKIS-DISCの利用設定が無効です。\n"
+                f"管理者が `/channel_setting value:true` をこのチャンネルで実行すると有効に戻せます。channel_id={channel_id}",
+                ephemeral=True,
+            )
+            return
+        uid = _discord_user_key(interaction.user.id)
+        text = _format_settings_text(config, uid, channel_id)
+        chunks = split_line_text(text, max_chunks=1)
+        await interaction.response.send_message(chunks[0] if chunks else MSG_SYSTEM_FAILURE, ephemeral=True)
+
+    @tree.command(name="set_setting", description="DKIS-DISCの設定を変更します。")
+    @app_commands.describe(key="変更する設定キー", value="保存する値（true/false/1/2/3/4/5）")
+    @app_commands.choices(
+        key=[
+            app_commands.Choice(name="talk with kiritan（きりたんとの会話設定）", value="talk_with_kiritan"),
+            app_commands.Choice(name="talking memory（会話履歴の保持）", value="talking_memory"),
+            app_commands.Choice(name="using model（使用するモデル）", value="using_model"),
+            app_commands.Choice(name="personal memory（個人用中期記憶）", value="personal_memory"),
+            app_commands.Choice(name="response criteria（botの応答モード）", value="response_criteria"),
+            app_commands.Choice(name="process notice（処理内容の付加表示）", value="process_notice"),
+        ],
+        value=[
+            app_commands.Choice(name="true", value="true"),
+            app_commands.Choice(name="false", value="false"),
+            app_commands.Choice(name="1", value="1"),
+            app_commands.Choice(name="2", value="2"),
+            app_commands.Choice(name="3", value="3"),
+            app_commands.Choice(name="4", value="4"),
+            app_commands.Choice(name="5", value="5"),
+        ],
+    )
+    async def slash_set_setting(interaction: discord.Interaction, key: str, value: str) -> None:
+        channel_id = str(interaction.channel_id or "")
+        channel_settings = get_channel_settings(channel_id)
+        if channel_settings.get("channel_kind", "normal") != "debug" and channel_settings.get("enabled", "off") != "on":
+            await interaction.response.send_message(
+                f"このチャンネルはDKIS-DISCの利用設定が無効です。channel_id={channel_id}",
+                ephemeral=True,
+            )
+            return
+        uid = _discord_user_key(interaction.user.id)
+        role = _user_role(uid)
+        if role == "visitor" and key == "using_model":
+            await interaction.response.send_message(
+                "visitor は using_model を変更できません。member 以上が必要です。",
+                ephemeral=True,
+            )
+            return
+        ok, line = set_setting_value(config, key, value, uid, channel_id)
+        await interaction.response.send_message(line, ephemeral=True)
+
+    @tree.command(
+        name="channel_setting",
+        description="このチャンネルで bot の有効/無効を設定します（operator は debug/normal も可）。",
+    )
+    @app_commands.describe(value="true（有効）/ false（無効）/ debug（デバッグルーム化・operator）/ normal（通常チャンネルに戻す・operator）")
+    @app_commands.choices(
+        value=[
+            app_commands.Choice(name="true（有効）", value="true"),
+            app_commands.Choice(name="false（無効）", value="false"),
+            app_commands.Choice(name="debug（デバッグルーム化/operator）", value="debug"),
+            app_commands.Choice(name="normal（通常チャンネルへ戻す/operator）", value="normal"),
+        ]
+    )
+    async def slash_channel_setting(interaction: discord.Interaction, value: str) -> None:
+        channel_id = str(interaction.channel_id or "")
+        value_lower = value.strip().lower()
+        if value_lower in {"debug", "normal"}:
+            if not _is_interaction_operator(interaction):
+                await interaction.response.send_message(
+                    "デバッグルーム設定は operator または `DISCORD_OPERATOR_USER_IDS` のユーザーだけ変更できます。",
+                    ephemeral=True,
+                )
+                return
+            kind = "debug" if value_lower == "debug" else "normal"
+            ok, line = set_channel_setting(channel_id, "channel_kind", kind)
+            if ok and kind == "debug":
+                line += "\nこのチャンネルはデバッグルームです。通常会話は無効で、起動通知などの専用通知が届きます。"
+            await interaction.response.send_message(line, ephemeral=True)
+            return
+        if not _is_interaction_admin(interaction):
+            await interaction.response.send_message(
+                "チャンネル設定はDiscord管理者または `DISCORD_ADMIN_USER_IDS` のユーザーだけ変更できます。",
+                ephemeral=True,
+            )
+            return
+        ok, line = set_channel_setting(channel_id, "enabled", value)
+        await interaction.response.send_message(line, ephemeral=True)
+
+    # -------------------------------------------------------
+    # イベントハンドラ
+    # -------------------------------------------------------
 
     @client.event
     async def on_ready() -> None:
@@ -838,6 +643,9 @@ def create_bot(runtime: BotRuntime | None = None) -> discord.Client:
         logger.info("Logged in as %s (%s)", client.user, getattr(client.user, "id", "-"))
         if presence_task is None or presence_task.done():
             presence_task = asyncio.create_task(_presence_loop(client))
+
+        await _sync_app_commands(tree)
+
         if boot_greeting_sent:
             return
         boot_greeting_sent = True
@@ -852,7 +660,7 @@ def create_bot(runtime: BotRuntime | None = None) -> discord.Client:
             restart_push_enabled=config.restart_push_enabled,
         )
         status_text = _build_boot_status_text(client, greeting)
-        await _send_boot_status_to_debug_rooms(client, status_text, channel_id)
+        await _send_to_debug_rooms(client, status_text, channel_id)
 
     @client.event
     async def on_message(message: discord.Message) -> None:
@@ -911,8 +719,17 @@ def create_bot(runtime: BotRuntime | None = None) -> discord.Client:
                 )
                 _remember_response_channel(message.channel.id)
         except Exception:
+            tb = traceback.format_exc()
             logger.exception("AI reply generation or Discord send failed")
             await message.channel.send(MSG_SYSTEM_FAILURE)
+            asyncio.create_task(
+                _send_error_to_debug_rooms(
+                    client,
+                    f"on_message エラー uid={uid} channel={message.channel.id}",
+                    tb,
+                    _discord_channel_id(),
+                )
+            )
 
     if not token_ready:
         logger.warning("DISCORD_BOT_TOKEN is not set; bot.run will fail until it is configured")
@@ -923,8 +740,7 @@ if __name__ == "__main__":
     load_dotenv()
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper())
     runtime = _build_runtime()
-    _register_discord_commands(runtime.config)
-    _start_health_server(runtime)
+    _start_health_server()
     _start_self_ping()
     bot = create_bot(runtime)
     TOKEN = (os.environ.get("DISCORD_BOT_TOKEN") or "").strip()

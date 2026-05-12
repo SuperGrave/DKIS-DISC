@@ -5,8 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import random
-from datetime import datetime
-from zoneinfo import ZoneInfo
+from datetime import datetime, timezone
 
 from .parsing import format_model_response_block
 from .supabase_store import (
@@ -159,13 +158,13 @@ def take_worker_boot_push_for_history(uid: str) -> str | None:
     return s if s else None
 
 
-def _boot_greeting_hour_jst() -> int:
-    return datetime.now(ZoneInfo("Asia/Tokyo")).hour
+def _boot_greeting_hour_utc() -> int:
+    return datetime.now(timezone.utc).hour
 
 
 def pick_worker_boot_greeting_text() -> str:
-    """JST の現在時に応じた 48 種から 1 通を選ぶ。"""
-    h = _boot_greeting_hour_jst()
+    """UTC の現在時に応じた 48 種から 1 通を選ぶ。"""
+    h = _boot_greeting_hour_utc()
     a, b = _BOOT_GREETINGS_BY_HOUR[h]
     return random.choice((a, b))
 
@@ -220,7 +219,7 @@ def maybe_build_worker_boot_greeting(
 ) -> str | None:
     """起動時に定型あいさつ文を用意する。
     - 投稿の実際の送信先は ``main.py`` の ``on_ready`` が決める（``channel_kind=debug`` があればそこへ、無ければ ``DISCORD_CHANNEL_ID``）
-    - Supabase の ``known_line_users.notify_on_restart=true`` …ユーザーが **SET-SETTING** でオプトインした Id のみ（任意・上限あり）
+    - Supabase の ``discord_users.notify_on_restart=true`` …ユーザーが **SET-SETTING** でオプトインした Id のみ（任意・上限あり）
 
     ``notify_worker_restart`` をオンにしたユーザーへは、次の 1 回の応答生成で
     OpenAI 用履歴の先頭に assistant として起動あいさつを差し込みます。

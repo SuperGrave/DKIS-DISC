@@ -1,6 +1,6 @@
-"""Supabase: user_settings（全ユーザー共通）、memory_files（Discord user_id 別）、known_line_users（中期記憶・起動通知オプトイン等）。
+"""Supabase: user_settings（全ユーザー共通）、memory_files（Discord user_id 別）、discord_users（中期記憶・起動通知オプトイン等）。
 
-DB の既存テーブル名・列名には旧実装由来の line_user_id が残るが、格納値は Discord user_id。
+テーブル名は discord_users、ユーザー識別列は user_id。
 """
 
 from __future__ import annotations
@@ -13,12 +13,10 @@ from datetime import datetime, timezone
 from typing import Any
 
 MAX_DISCORD_USER_ID_LEN = 128
-# 旧 import 名の互換。
-MAX_LINE_USER_ID_LEN = MAX_DISCORD_USER_ID_LEN
 
 
 def normalize_memory_user_id(uid: str | None) -> str:
-    """LIST/READ/WRITE 系で memory_files.line_user_id（互換列）に格納する Discord user_id。"""
+    """LIST/READ/WRITE 系で memory_files.user_id に格納する Discord user_id。"""
     u = (uid or "").strip()
     if not u:
         return "anonymous"
@@ -30,7 +28,7 @@ def normalize_memory_user_id(uid: str | None) -> str:
 _filename_safe_re = re.compile(r"^[\w\-\.\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]+$")
 MAX_FILENAME_LEN = 200
 MAX_MEMORY_CONTENT_CHARS = 500_000
-MID_TERM_NOTE_MAX_CHARS = 200
+MID_TERM_NOTE_MAX_CHARS = 500
 USER_MODEL_CHOICES = {
     "1": "gpt-4.1-mini",
     "2": "gpt-5.4-mini",
@@ -40,7 +38,7 @@ USER_MODEL_CHOICES = {
 }
 TALKING_MEMORY_TURNS = {"1": 15, "2": 10, "3": 5, "4": 0}
 USER_RESPONSE_MODES = {"1": "normal", "2": "mention"}
-PROCESS_NOTICE_MODES = {"1": "hidden", "2": "abbrev", "3": "full", "4": "raw"}
+PROCESS_NOTICE_MODES = {"1": "hidden", "2": "minimal", "3": "abbrev", "4": "raw"}
 USER_ROLES = frozenset({"visitor", "member", "operator"})
 ROLE_DAILY_TOKEN_LIMITS = {"visitor": 1_000_000, "member": 10_000_000, "operator": 10_000_000}
 DEFAULT_USER_SETTINGS = {
@@ -203,9 +201,9 @@ def get_discord_user_settings(uid: str | None) -> dict[str, str]:
         return dict(DEFAULT_USER_SETTINGS)
     try:
         r = (
-            sb.table("known_line_users")
+            sb.table("discord_users")
             .select("talk_with_kiritan,talking_memory,using_model,personal_memory,response_criteria,user_role")
-            .eq("line_user_id", u)
+            .eq("user_id", u)
             .limit(1)
             .execute()
         )
@@ -214,9 +212,9 @@ def get_discord_user_settings(uid: str | None) -> dict[str, str]:
     except Exception:
         try:
             r = (
-                sb.table("known_line_users")
+                sb.table("discord_users")
                 .select("talk_with_kiritan,talking_memory,using_model,personal_memory,response_criteria")
-                .eq("line_user_id", u)
+                .eq("user_id", u)
                 .limit(1)
                 .execute()
             )
@@ -255,13 +253,13 @@ def set_discord_user_setting(uid: str | None, key: str, value: str) -> tuple[boo
     if sb is None:
         return False, "Supabase が未設定です（SUPABASE_URL / SUPABASE_KEY）。"
     try:
-        sb.table("known_line_users").upsert(
+        sb.table("discord_users").upsert(
             {
-                "line_user_id": u,
+                "user_id": u,
                 "last_seen_at": _now_iso(),
                 **current,
             },
-            on_conflict="line_user_id",
+            on_conflict="user_id",
         ).execute()
         return True, ""
     except Exception as exc:
@@ -283,9 +281,9 @@ def get_discord_user_stats(uid: str | None) -> dict[str, int | str]:
         return out
     try:
         r = (
-            sb.table("known_line_users")
+            sb.table("discord_users")
             .select("conversation_count,mid_term_note,daily_token_date,daily_token_count")
-            .eq("line_user_id", u)
+            .eq("user_id", u)
             .limit(1)
             .execute()
         )
@@ -314,7 +312,7 @@ def get_runtime_usage_summary() -> dict[str, int]:
         return out
     today = datetime.now(timezone.utc).date().isoformat()
     try:
-        r = sb.table("known_line_users").select("line_user_id,daily_token_date,daily_token_count").execute()
+        r = sb.table("discord_users").select("user_id,daily_token_date,daily_token_count").execute()
         rows = r.data or []
         out["registered_users"] = len(rows)
         for row in rows:
@@ -339,9 +337,9 @@ def record_discord_user_usage(uid: str | None, *, tokens: int = 0) -> None:
     today = datetime.now(timezone.utc).date().isoformat()
     try:
         r = (
-            sb.table("known_line_users")
+            sb.table("discord_users")
             .select("conversation_count,daily_token_date,daily_token_count")
-            .eq("line_user_id", u)
+            .eq("user_id", u)
             .limit(1)
             .execute()
         )
@@ -350,15 +348,15 @@ def record_discord_user_usage(uid: str | None, *, tokens: int = 0) -> None:
         old_date = str(row.get("daily_token_date") or "")
         daily_count = int(row.get("daily_token_count") or 0) if old_date == today else 0
         daily_count += max(0, int(tokens or 0))
-        sb.table("known_line_users").upsert(
+        sb.table("discord_users").upsert(
             {
-                "line_user_id": u,
+                "user_id": u,
                 "last_seen_at": _now_iso(),
                 "conversation_count": conversation_count,
                 "daily_token_date": today,
                 "daily_token_count": daily_count,
             },
-            on_conflict="line_user_id",
+            on_conflict="user_id",
         ).execute()
     except Exception:
         pass
@@ -431,14 +429,14 @@ def get_channel_settings(channel_id: str | int | None, *, use_cache: bool = True
         if process_notice in PROCESS_NOTICE_MODES:
             out["process_notice"] = process_notice
             out["tool_notice_display"] = process_notice_mode_from_choice(process_notice)
-        elif tool_notice_display in {"hidden", "abbrev", "minimal", "full", "raw"}:
+        elif tool_notice_display in {"hidden", "minimal", "abbrev", "full", "raw"}:
             out["process_notice"] = {
                 "hidden": "1",
-                "abbrev": "2",
                 "minimal": "2",
+                "abbrev": "3",
                 "full": "3",
                 "raw": "4",
-            }[tool_notice_display]
+            }.get(tool_notice_display, "2")
         _remember_channel_settings_cache(cid, out)
         return out
     except Exception:
@@ -543,7 +541,7 @@ def remember_discord_user_for_push(uid: str | None) -> None:
         return
     notify = False
     try:
-        r = sb.table("known_line_users").select("notify_on_restart").eq("line_user_id", u).limit(1).execute()
+        r = sb.table("discord_users").select("notify_on_restart").eq("user_id", u).limit(1).execute()
         rows = r.data or []
         if rows:
             v = rows[0].get("notify_on_restart")
@@ -551,9 +549,9 @@ def remember_discord_user_for_push(uid: str | None) -> None:
     except Exception:
         pass
     try:
-        sb.table("known_line_users").upsert(
-            {"line_user_id": u, "last_seen_at": _now_iso(), "notify_on_restart": notify},
-            on_conflict="line_user_id",
+        sb.table("discord_users").upsert(
+            {"user_id": u, "last_seen_at": _now_iso(), "notify_on_restart": notify},
+            on_conflict="user_id",
         ).execute()
     except Exception:
         pass
@@ -576,8 +574,8 @@ def list_boot_notification_recipient_ids() -> list[str]:
     lim = _boot_push_store_limit()
     try:
         r = (
-            sb.table("known_line_users")
-            .select("line_user_id")
+            sb.table("discord_users")
+            .select("user_id")
             .eq("notify_on_restart", True)
             .order("last_seen_at", desc=True)
             .limit(lim)
@@ -585,7 +583,7 @@ def list_boot_notification_recipient_ids() -> list[str]:
         )
         out: list[str] = []
         for row in r.data or []:
-            lid = str(row.get("line_user_id") or "").strip()
+            lid = str(row.get("user_id") or "").strip()
             if lid and lid != "anonymous":
                 out.append(lid)
         return out
@@ -594,7 +592,7 @@ def list_boot_notification_recipient_ids() -> list[str]:
 
 
 def get_notify_worker_restart(uid: str | None) -> bool:
-    """この Discord user_id がワーカー起動通知を受け取るか（known_line_users.notify_on_restart）。"""
+    """この Discord user_id がワーカー起動通知を受け取るか（discord_users.notify_on_restart）。"""
     u = normalize_memory_user_id(uid)
     if u == "anonymous":
         return False
@@ -602,7 +600,7 @@ def get_notify_worker_restart(uid: str | None) -> bool:
     if sb is None:
         return False
     try:
-        r = sb.table("known_line_users").select("notify_on_restart").eq("line_user_id", u).limit(1).execute()
+        r = sb.table("discord_users").select("notify_on_restart").eq("user_id", u).limit(1).execute()
         rows = r.data or []
         if not rows:
             return False
@@ -613,7 +611,7 @@ def get_notify_worker_restart(uid: str | None) -> bool:
 
 
 def get_mid_term_note(uid: str | None) -> str:
-    """known_line_users.mid_term_note。1 本・短文のユーザー別中期記憶。"""
+    """discord_users.mid_term_note。1 本・短文のユーザー別中期記憶。"""
     u = normalize_memory_user_id(uid)
     if u == "anonymous":
         return ""
@@ -621,7 +619,7 @@ def get_mid_term_note(uid: str | None) -> str:
     if sb is None:
         return ""
     try:
-        r = sb.table("known_line_users").select("mid_term_note").eq("line_user_id", u).limit(1).execute()
+        r = sb.table("discord_users").select("mid_term_note").eq("user_id", u).limit(1).execute()
         rows = r.data or []
         if not rows:
             return ""
@@ -646,9 +644,9 @@ def append_mid_term_note(uid: str | None, chunk: str) -> tuple[bool, str]:
     cur = ""
     try:
         r = (
-            sb.table("known_line_users")
+            sb.table("discord_users")
             .select("notify_on_restart,mid_term_note")
-            .eq("line_user_id", u)
+            .eq("user_id", u)
             .limit(1)
             .execute()
         )
@@ -665,14 +663,14 @@ def append_mid_term_note(uid: str | None, chunk: str) -> tuple[bool, str]:
     if len(merged) > MID_TERM_NOTE_MAX_CHARS:
         merged = merged[-MID_TERM_NOTE_MAX_CHARS:]
     try:
-        sb.table("known_line_users").upsert(
+        sb.table("discord_users").upsert(
             {
-                "line_user_id": u,
+                "user_id": u,
                 "last_seen_at": _now_iso(),
                 "notify_on_restart": notify,
                 "mid_term_note": merged,
             },
-            on_conflict="line_user_id",
+            on_conflict="user_id",
         ).execute()
         return True, (
             f"MID-MEMORY-APPEND 完了（現在 {len(merged)} 字・上限 {MID_TERM_NOTE_MAX_CHARS}）。\n{merged}"
@@ -690,7 +688,7 @@ def clear_mid_term_note(uid: str | None) -> tuple[bool, str]:
         return False, "Supabase が未設定です。"
     notify = False
     try:
-        r = sb.table("known_line_users").select("notify_on_restart").eq("line_user_id", u).limit(1).execute()
+        r = sb.table("discord_users").select("notify_on_restart").eq("user_id", u).limit(1).execute()
         rows = r.data or []
         if rows:
             v = rows[0].get("notify_on_restart")
@@ -698,14 +696,14 @@ def clear_mid_term_note(uid: str | None) -> tuple[bool, str]:
     except Exception:
         pass
     try:
-        sb.table("known_line_users").upsert(
+        sb.table("discord_users").upsert(
             {
-                "line_user_id": u,
+                "user_id": u,
                 "last_seen_at": _now_iso(),
                 "notify_on_restart": notify,
                 "mid_term_note": "",
             },
-            on_conflict="line_user_id",
+            on_conflict="user_id",
         ).execute()
         return True, "MID-MEMORY-CLEAR 完了（中期記憶を空にしました）。"
     except Exception as exc:
@@ -730,7 +728,7 @@ def set_pending_worker_boot_history(uid: str | None, assistant_history_block: st
         return
     notify = False
     try:
-        r = sb.table("known_line_users").select("notify_on_restart").eq("line_user_id", u).limit(1).execute()
+        r = sb.table("discord_users").select("notify_on_restart").eq("user_id", u).limit(1).execute()
         rows = r.data or []
         if rows:
             v = rows[0].get("notify_on_restart")
@@ -738,14 +736,14 @@ def set_pending_worker_boot_history(uid: str | None, assistant_history_block: st
     except Exception:
         pass
     try:
-        sb.table("known_line_users").upsert(
+        sb.table("discord_users").upsert(
             {
-                "line_user_id": u,
+                "user_id": u,
                 "last_seen_at": _now_iso(),
                 "notify_on_restart": notify,
                 "pending_worker_boot_history": block,
             },
-            on_conflict="line_user_id",
+            on_conflict="user_id",
         ).execute()
     except Exception:
         pass
@@ -761,9 +759,9 @@ def take_pending_worker_boot_history(uid: str | None) -> str | None:
         return None
     try:
         r = (
-            sb.table("known_line_users")
+            sb.table("discord_users")
             .select("pending_worker_boot_history")
-            .eq("line_user_id", u)
+            .eq("user_id", u)
             .limit(1)
             .execute()
         )
@@ -776,20 +774,18 @@ def take_pending_worker_boot_history(uid: str | None) -> str | None:
         s = str(val).strip()
         if not s:
             try:
-                sb.table("known_line_users").update({"pending_worker_boot_history": None}).eq(
-                    "line_user_id", u
-                ).execute()
+                sb.table("discord_users").update({"pending_worker_boot_history": None}).eq("user_id", u).execute()
             except Exception:
                 pass
             return None
-        sb.table("known_line_users").update({"pending_worker_boot_history": None}).eq("line_user_id", u).execute()
+        sb.table("discord_users").update({"pending_worker_boot_history": None}).eq("user_id", u).execute()
         return s
     except Exception:
         return None
 
 
 def set_notify_worker_restart(uid: str | None, enabled: bool) -> tuple[bool, str]:
-    """known_line_users に upsert し、notify_on_restart を設定する。"""
+    """discord_users に upsert し、notify_on_restart を設定する。"""
     u = normalize_memory_user_id(uid)
     if u == "anonymous":
         return False, "Discord userId が無いため設定できません。"
@@ -797,9 +793,9 @@ def set_notify_worker_restart(uid: str | None, enabled: bool) -> tuple[bool, str
     if sb is None:
         return False, "Supabase が未設定です（SUPABASE_URL / SUPABASE_KEY）。"
     try:
-        sb.table("known_line_users").upsert(
-            {"line_user_id": u, "last_seen_at": _now_iso(), "notify_on_restart": bool(enabled)},
-            on_conflict="line_user_id",
+        sb.table("discord_users").upsert(
+            {"user_id": u, "last_seen_at": _now_iso(), "notify_on_restart": bool(enabled)},
+            on_conflict="user_id",
         ).execute()
         return True, ""
     except Exception as exc:
@@ -822,8 +818,8 @@ def _normalize_list_row(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def memory_list_files(line_user_id: str) -> tuple[list[dict[str, Any]], str]:
-    uid = normalize_memory_user_id(line_user_id)
+def memory_list_files(user_id: str) -> tuple[list[dict[str, Any]], str]:
+    uid = normalize_memory_user_id(user_id)
     sb = _client()
     if sb is None:
         return [], "Supabase が未設定です。"
@@ -831,7 +827,7 @@ def memory_list_files(line_user_id: str) -> tuple[list[dict[str, Any]], str]:
         r = (
             sb.table("memory_files")
             .select("filename,description,updated_at,content_chars")
-            .eq("line_user_id", uid)
+            .eq("user_id", uid)
             .order("filename")
             .execute()
         )
@@ -842,7 +838,7 @@ def memory_list_files(line_user_id: str) -> tuple[list[dict[str, Any]], str]:
             r = (
                 sb.table("memory_files")
                 .select("filename,description,updated_at,content")
-                .eq("line_user_id", uid)
+                .eq("user_id", uid)
                 .order("filename")
                 .execute()
             )
@@ -861,11 +857,11 @@ def memory_list_files(line_user_id: str) -> tuple[list[dict[str, Any]], str]:
             return [], str(exc)
 
 
-def memory_read_row(filename: str, line_user_id: str) -> tuple[dict[str, Any] | None, str]:
+def memory_read_row(filename: str, user_id: str) -> tuple[dict[str, Any] | None, str]:
     fn = validate_memory_filename(filename)
     if fn is None:
         return None, "不正なファイル名です。"
-    uid = normalize_memory_user_id(line_user_id)
+    uid = normalize_memory_user_id(user_id)
     sb = _client()
     if sb is None:
         return None, "Supabase が未設定です。"
@@ -874,7 +870,7 @@ def memory_read_row(filename: str, line_user_id: str) -> tuple[dict[str, Any] | 
             sb.table("memory_files")
             .select("filename,content,description,updated_at")
             .eq("filename", fn)
-            .eq("line_user_id", uid)
+            .eq("user_id", uid)
             .limit(1)
             .execute()
         )
@@ -886,11 +882,11 @@ def memory_read_row(filename: str, line_user_id: str) -> tuple[dict[str, Any] | 
         return None, str(exc)
 
 
-def memory_write(filename: str, content: str, description: str, line_user_id: str) -> str:
+def memory_write(filename: str, content: str, description: str, user_id: str) -> str:
     fn = validate_memory_filename(filename)
     if fn is None:
         return "不正なファイル名です。"
-    uid = normalize_memory_user_id(line_user_id)
+    uid = normalize_memory_user_id(user_id)
     body = content if isinstance(content, str) else ""
     if len(body) > MAX_MEMORY_CONTENT_CHARS:
         body = body[: MAX_MEMORY_CONTENT_CHARS - 80] + "\n…（content が長すぎるため切り詰めました）"
@@ -899,7 +895,7 @@ def memory_write(filename: str, content: str, description: str, line_user_id: st
         return "Supabase が未設定です。"
     desc = (description or "").strip()[:5000]
     base_row = {
-        "line_user_id": uid,
+        "user_id": uid,
         "filename": fn,
         "content": body,
         "description": desc,
@@ -908,22 +904,22 @@ def memory_write(filename: str, content: str, description: str, line_user_id: st
     try:
         sb.table("memory_files").upsert(
             {**base_row, "content_chars": len(body)},
-            on_conflict="line_user_id,filename",
+            on_conflict="user_id,filename",
         ).execute()
         return ""
     except Exception:
         try:
-            sb.table("memory_files").upsert(base_row, on_conflict="line_user_id,filename").execute()
+            sb.table("memory_files").upsert(base_row, on_conflict="user_id,filename").execute()
             return ""
         except Exception as exc:
             return str(exc)
 
 
-def memory_append(filename: str, append_content: str, line_user_id: str) -> str:
+def memory_append(filename: str, append_content: str, user_id: str) -> str:
     fn = validate_memory_filename(filename)
     if fn is None:
         return "不正なファイル名です。"
-    uid = normalize_memory_user_id(line_user_id)
+    uid = normalize_memory_user_id(user_id)
     chunk = append_content if isinstance(append_content, str) else ""
     sb = _client()
     if sb is None:
@@ -933,7 +929,7 @@ def memory_append(filename: str, append_content: str, line_user_id: str) -> str:
             sb.table("memory_files")
             .select("content,description")
             .eq("filename", fn)
-            .eq("line_user_id", uid)
+            .eq("user_id", uid)
             .limit(1)
             .execute()
         )
@@ -948,7 +944,7 @@ def memory_append(filename: str, append_content: str, line_user_id: str) -> str:
         if len(merged) > MAX_MEMORY_CONTENT_CHARS:
             merged = merged[: MAX_MEMORY_CONTENT_CHARS - 80] + "\n…（結合後に長すぎるため切り詰めました）"
         base_row = {
-            "line_user_id": uid,
+            "user_id": uid,
             "filename": fn,
             "content": merged,
             "description": desc,
@@ -957,20 +953,20 @@ def memory_append(filename: str, append_content: str, line_user_id: str) -> str:
         try:
             sb.table("memory_files").upsert(
                 {**base_row, "content_chars": len(merged)},
-                on_conflict="line_user_id,filename",
+                on_conflict="user_id,filename",
             ).execute()
         except Exception:
-            sb.table("memory_files").upsert(base_row, on_conflict="line_user_id,filename").execute()
+            sb.table("memory_files").upsert(base_row, on_conflict="user_id,filename").execute()
         return ""
     except Exception as exc:
         return str(exc)
 
 
-def memory_delete(filename: str, line_user_id: str) -> str:
+def memory_delete(filename: str, user_id: str) -> str:
     fn = validate_memory_filename(filename)
     if fn is None:
         return "不正なファイル名です。"
-    uid = normalize_memory_user_id(line_user_id)
+    uid = normalize_memory_user_id(user_id)
     sb = _client()
     if sb is None:
         return "Supabase が未設定です。"
@@ -980,10 +976,60 @@ def memory_delete(filename: str, line_user_id: str) -> str:
     if row is None:
         return "DELETE-TEXT: ファイルが見つかりません。"
     try:
-        sb.table("memory_files").delete().eq("filename", fn).eq("line_user_id", uid).execute()
+        sb.table("memory_files").delete().eq("filename", fn).eq("user_id", uid).execute()
         return ""
     except Exception as exc:
         return str(exc)
+
+
+_MAX_HISTORY_SAVE_MESSAGES = 60  # ターン上限(30)×2 + バッファ
+
+
+def save_conversation_history(uid: str | None, messages: list[dict]) -> None:
+    """システムメッセージを除いた会話履歴を discord_users.chat_history に保存する。"""
+    u = normalize_memory_user_id(uid)
+    if u == "anonymous":
+        return
+    sb = _client()
+    if sb is None:
+        return
+    history = [m for m in messages if m.get("role") != "system"]
+    if len(history) > _MAX_HISTORY_SAVE_MESSAGES:
+        history = history[-_MAX_HISTORY_SAVE_MESSAGES:]
+    try:
+        sb.table("discord_users").upsert(
+            {"user_id": u, "last_seen_at": _now_iso(), "chat_history": history},
+            on_conflict="user_id",
+        ).execute()
+    except Exception:
+        pass
+
+
+def load_conversation_history(uid: str | None) -> list[dict]:
+    """discord_users.chat_history から会話履歴（システムメッセージ除く）を取得する。"""
+    u = normalize_memory_user_id(uid)
+    if u == "anonymous":
+        return []
+    sb = _client()
+    if sb is None:
+        return []
+    try:
+        r = (
+            sb.table("discord_users")
+            .select("chat_history")
+            .eq("user_id", u)
+            .limit(1)
+            .execute()
+        )
+        rows = r.data or []
+        if not rows:
+            return []
+        val = rows[0].get("chat_history")
+        if not isinstance(val, list):
+            return []
+        return [m for m in val if isinstance(m, dict) and m.get("role") in ("user", "assistant")]
+    except Exception:
+        return []
 
 
 def dumps_memory_index(rows: list[dict[str, Any]]) -> str:
